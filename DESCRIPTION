@@ -1,0 +1,19 @@
+Package: simdatacopulas
+Title: Copula-Based Joint Distribution Modules for simdata
+Version: 0.0.0.9000
+Authors@R: c(
+    person("Your", "Name", email = "you@example.com", role = c("aut", "cre"))
+  )
+Description: Extends simdata with copula-based joint distribution generators via simdesign templates.
+License: MIT
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports:
+    copula,
+    simdata
+Suggests:
+    testthat (>= 3.0.0),
+    VineCopula
+Config/testthat/edition: 3
+
