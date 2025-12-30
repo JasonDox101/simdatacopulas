@@ -1,0 +1,10 @@
+pandoc: 3.6.3
+pkgdown: 2.2.0
+pkgdown_sha: ~
+articles:
+  Archimedean: Archimedean.html
+  Elliptical: Elliptical.html
+  Empirical: Empirical.html
+  Factor: Factor.html
+  Vine: Vine.html
+last_built: 2025-12-30T08:25Z
