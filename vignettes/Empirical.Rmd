@@ -1,0 +1,259 @@
+---
+title: "Empirical Copula → TrialSimulator：端到端示例（Rank Resampling）"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Empirical Copula to TrialSimulator (Rank Resampling)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r, echo = FALSE, results = "asis"}
+cat(
+  "<style>\n",
+  "pre.sourceCode { background-color: #f7f7f7; }\n",
+  "pre > code.sourceCode > span { display: block; }\n",
+  "</style>\n",
+  sep = ""
+)
+```
+
+本 vignette 展示如何把 `simdatacopulas` 的经验 copula（empirical copula / rank resampling）联合生成器封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+
+1. 用“先导/历史数据”的联合秩结构（`u_data`）复刻依赖结构
+2. 用你指定的边缘分位数函数（`dist`）控制边缘分布
+3. 接入 TrialSimulator 并运行完整试验仿真流程
+
+经验 copula 的关键特征：
+
+- 强项：可以非常直接地复刻历史数据中的联合秩结构（无需选择参数化 copula 家族）
+- 限制：外推能力弱，尤其是“未观察到的尾部极端结构”难以凭空增强
+
+## 1. 加载依赖
+
+```{r}
+library(simdata)
+library(simdatacopulas)
+library(TrialSimulator)
+library(copula)
+```
+
+## 2. 准备先导数据（pilot）并提取 `u_data`
+
+经验 copula 的输入通常是一个 `u_data`：它是历史样本做 `pobs()` 得到的伪观测（pseudo-observations），本质上保留了联合秩结构。
+
+本例为了可复现，先构造一份 pilot 数据；在你的真实项目中，你应该把 `pilot` 替换成真实历史数据。
+
+```{r}
+set.seed(20251230)
+
+n_pilot <- 2000
+
+Sigma <- matrix(c(
+  1.0,  0.5,  0.3,  0.2,
+  0.5,  1.0,  0.4,  0.3,
+  0.3,  0.4,  1.0,  0.6,
+  0.2,  0.3,  0.6,  1.0
+), nrow = 4, byrow = TRUE)
+
+L <- chol(Sigma)
+E <- matrix(stats::rnorm(n_pilot * 4), nrow = n_pilot, ncol = 4)
+Z <- E %*% t(L)
+U <- stats::pnorm(Z)
+
+pilot <- data.frame(
+  PFS_raw     = stats::qlnorm(U[, 1], meanlog = log(8),  sdlog = 0.60),
+  OS_extra    = stats::qlnorm(U[, 2], meanlog = log(6),  sdlog = 0.60),
+  BIOM_latent = stats::qnorm(U[, 3],  mean = 0,         sd = 1.0),
+  ORR_latent  = stats::qnorm(U[, 4],  mean = 0,         sd = 1.0)
+)
+
+u_data <- copula::pobs(as.matrix(pilot))
+u_data <- pmin(pmax(u_data, 1e-6), 1 - 1e-6)
+```
+
+## 3. 定义你要用于仿真的边缘分布（dist）
+
+经验 copula 的典型用法是：
+
+- 依赖结构：来自历史数据的 `u_data`
+- 边缘分布：来自你指定的 `dist`（可以与历史数据不同）
+
+这里我们构造 placebo 与 treatment 两组边缘参数差异来表达治疗效果。
+
+```{r}
+dist_pbo <- list(
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(6),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0)
+)
+
+dist_trt <- list(
+  function(u) stats::qlnorm(u, meanlog = log(10), sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = -0.3,       sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0.5,        sd = 1.0)
+)
+```
+
+## 4. 构造经验 copula 的 `simdesign`
+
+`simdesign_empirical_copula()` 会从 `u_data` 中重采样联合秩结构（rank resampling），然后再用 `dist` 将每列映射到目标尺度。
+
+```{r}
+design_pbo <- simdesign_empirical_copula(
+  u_data      = u_data,
+  dist        = dist_pbo,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent"),
+  replace     = TRUE,
+  jitter      = 0
+)
+
+design_trt <- simdesign_empirical_copula(
+  u_data      = u_data,
+  dist        = dist_trt,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent"),
+  replace     = TRUE,
+  jitter      = 0
+)
+```
+
+## 5. 封装成 TrialSimulator 的 `generator(n)`
+
+TrialSimulator 对 endpoint generator 的协议要点：
+
+- 第一个参数名必须是 `n`
+- 返回 `data.frame` 且有 `n` 行
+- 对 TTE：必须提供 `<name>_event` 列
+- 对 non-tte：必须提供 `readout`
+
+本例构造 4 个终点：
+
+- `PFS`, `OS`：TTE，其中 `OS = PFS + extra` 保证 `OS >= PFS`
+- `ORR`：二分类 non-tte，由 `ORR_latent` 阈值化得到
+- `BIOM`：连续 non-tte
+
+```{r}
+make_empirical_endpoint_rng <- function(design, orr_cutoff) {
+  function(n) {
+    latent <- simdata::simulate_data(design, n_obs = n)
+
+    pfs_raw  <- latent[["PFS_raw"]]
+    os_extra <- latent[["OS_extra"]]
+
+    PFS <- pfs_raw
+    OS  <- pfs_raw + os_extra
+
+    data.frame(
+      PFS       = PFS,
+      PFS_event = rep(1L, n),
+      OS        = OS,
+      OS_event  = rep(1L, n),
+      ORR       = as.integer(latent[["ORR_latent"]] > orr_cutoff),
+      BIOM      = latent[["BIOM_latent"]]
+    )
+  }
+}
+
+rng_pbo <- make_empirical_endpoint_rng(design_pbo, orr_cutoff = stats::qnorm(0.6))
+rng_trt <- make_empirical_endpoint_rng(design_trt, orr_cutoff = stats::qnorm(0.4))
+
+head(rng_pbo(n = 3))
+head(rng_trt(n = 3))
+```
+
+## 6. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行
+
+```{r}
+enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
+dropout_fn  <- function(n) stats::rexp(n, rate = log(2) / 40)
+
+ep_pbo <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_pbo
+)
+
+ep_trt <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_trt
+)
+
+arm_pbo <- arm(name = "placebo")
+arm_pbo$add_endpoints(ep_pbo)
+
+arm_trt <- arm(name = "treatment")
+arm_trt$add_endpoints(ep_trt)
+
+trial_obj <- trial(
+  name       = "empirical-copula-demo",
+  n_patients = 400,
+  duration   = 36,
+  enroller   = enroller_fn,
+  dropout    = dropout_fn,
+  seed       = 20251230,
+  silent     = TRUE
+)
+trial_obj$add_arms(sample_ratio = c(1, 1), arm_pbo, arm_trt)
+
+milestone_interim <- milestone(
+  name   = "interim",
+  when   = eventNumber(endpoint = "PFS", n = 100),
+  action = doNothing
+)
+
+milestone_final <- milestone(
+  name   = "final",
+  when   = calendarTime(time = 36),
+  action = doNothing
+)
+
+listener_obj <- listener()
+listener_obj$add_milestones(milestone_interim, milestone_final)
+
+controller_obj <- controller(trial_obj, listener_obj)
+controller_obj$run(plot_event = FALSE)
+```
+
+## 7. 读取锁库数据并做基础校验
+
+```{r}
+locked_interim <- trial_obj$get_locked_data("interim")
+locked_final   <- trial_obj$get_locked_data("final")
+
+head(locked_interim)
+head(locked_final)
+
+all(locked_final$OS >= locked_final$PFS, na.rm = TRUE)
+with(locked_final, stats::cor(PFS, OS, use = "complete.obs"))
+
+with(subset(locked_final, arm == "placebo"), mean(ORR, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(ORR, na.rm = TRUE))
+
+with(subset(locked_final, arm == "placebo"), mean(BIOM, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(BIOM, na.rm = TRUE))
+
+with(locked_final, tapply(PFS_event, arm, mean, na.rm = TRUE))
+with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
+
+with(locked_final, tapply(is.na(ORR), arm, mean))
+with(locked_final, tapply(is.na(BIOM), arm, mean))
+```
+
+## 8. 常见变体
+
+- 如果历史数据 ties 很多（离散化严重），可考虑 `jitter > 0` 打散重合点。
+- 如果你希望完全复刻历史边缘分布（而不是自定义边缘），可用 `simdesign_empirical_copula_from_data(data, vars, ...)` 直接从数据生成 `u_data` 并用经验分位数作为边缘。
+

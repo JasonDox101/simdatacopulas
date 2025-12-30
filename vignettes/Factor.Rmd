@@ -1,0 +1,223 @@
+---
+title: "Factor Copula → TrialSimulator：端到端示例（Factor Gaussian Copula）"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Factor Copula to TrialSimulator (Factor Gaussian Copula)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r, echo = FALSE, results = "asis"}
+cat(
+  "<style>\n",
+  "pre.sourceCode { background-color: #f7f7f7; }\n",
+  "pre > code.sourceCode > span { display: block; }\n",
+  "</style>\n",
+  sep = ""
+)
+```
+
+本 vignette 展示如何把 `simdatacopulas` 的因子 copula（Factor Gaussian copula）联合生成器封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+
+1. 用因子结构（`loadings`, `uniq_var`）定义高维相关（低秩 + 对角）
+2. 用你指定的边缘分位数函数（`dist`）控制边缘分布
+3. 接入 TrialSimulator 并运行 milestones / 锁库 / 读取 locked data
+
+## 1. 加载依赖
+
+```{r}
+library(simdata)
+library(simdatacopulas)
+library(TrialSimulator)
+```
+
+## 2. 定义因子结构与边缘分布（dist），构造 `simdesign`
+
+我们构造 4 个相关变量：
+
+- `PFS_raw`：PFS 的原始生存时间（正数）
+- `OS_extra`：PFS 之后额外存活时间（正数）
+- `BIOM_latent`：连续 biomarker
+- `ORR_latent`：latent 正态，后续阈值化为二分类 ORR
+
+placebo 与 treatment 使用相同的因子 copula 依赖结构（相同 `loadings` 与 `uniq_var`），但边缘分布参数不同，用于表达“治疗效果”。
+
+```{r}
+set.seed(20251230)
+
+d <- 4L
+
+loadings <- matrix(c(
+  0.85,
+  0.75,
+  0.55,
+  0.65
+), nrow = d, ncol = 1)
+
+uniq_var <- c(0.50, 0.60, 0.80, 0.70)
+
+dist_pbo <- list(
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(6),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0)
+)
+
+dist_trt <- list(
+  function(u) stats::qlnorm(u, meanlog = log(10), sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = -0.3,       sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0.5,        sd = 1.0)
+)
+
+design_pbo <- simdesign_factor_copula(
+  loadings    = loadings,
+  uniq_var    = uniq_var,
+  dist        = dist_pbo,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent"),
+  eps         = 1e-6
+)
+
+design_trt <- simdesign_factor_copula(
+  loadings    = loadings,
+  uniq_var    = uniq_var,
+  dist        = dist_trt,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent"),
+  eps         = 1e-6
+)
+```
+
+## 3. 封装成 TrialSimulator 的 `generator(n)`
+
+TrialSimulator 对 endpoint generator 的协议要点：
+
+- 第一个参数名必须是 `n`
+- 返回 `data.frame` 且有 `n` 行
+- 对 TTE：必须提供 `<name>_event` 列
+- 对 non-tte：必须提供 `readout`
+
+本例构造 4 个终点：
+
+- `PFS`, `OS`：TTE，其中 `OS = PFS + extra` 保证 `OS >= PFS`
+- `ORR`：二分类 non-tte，由 `ORR_latent` 阈值化得到
+- `BIOM`：连续 non-tte
+
+```{r}
+make_factor_endpoint_rng <- function(design, orr_cutoff) {
+  function(n) {
+    latent <- simdata::simulate_data(design, n_obs = n)
+
+    pfs_raw  <- latent[["PFS_raw"]]
+    os_extra <- latent[["OS_extra"]]
+
+    PFS <- pfs_raw
+    OS  <- pfs_raw + os_extra
+
+    data.frame(
+      PFS       = PFS,
+      PFS_event = rep(1L, n),
+      OS        = OS,
+      OS_event  = rep(1L, n),
+      ORR       = as.integer(latent[["ORR_latent"]] > orr_cutoff),
+      BIOM      = latent[["BIOM_latent"]]
+    )
+  }
+}
+
+rng_pbo <- make_factor_endpoint_rng(design_pbo, orr_cutoff = stats::qnorm(0.6))
+rng_trt <- make_factor_endpoint_rng(design_trt, orr_cutoff = stats::qnorm(0.4))
+
+head(rng_pbo(n = 3))
+head(rng_trt(n = 3))
+```
+
+## 4. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行
+
+```{r}
+enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
+dropout_fn  <- function(n) stats::rexp(n, rate = log(2) / 40)
+
+ep_pbo <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_pbo
+)
+
+ep_trt <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_trt
+)
+
+arm_pbo <- arm(name = "placebo")
+arm_pbo$add_endpoints(ep_pbo)
+
+arm_trt <- arm(name = "treatment")
+arm_trt$add_endpoints(ep_trt)
+
+trial_obj <- trial(
+  name       = "factor-copula-demo",
+  n_patients = 400,
+  duration   = 36,
+  enroller   = enroller_fn,
+  dropout    = dropout_fn,
+  seed       = 20251230,
+  silent     = TRUE
+)
+trial_obj$add_arms(sample_ratio = c(1, 1), arm_pbo, arm_trt)
+
+milestone_interim <- milestone(
+  name   = "interim",
+  when   = eventNumber(endpoint = "PFS", n = 100),
+  action = doNothing
+)
+
+milestone_final <- milestone(
+  name   = "final",
+  when   = calendarTime(time = 36),
+  action = doNothing
+)
+
+listener_obj <- listener()
+listener_obj$add_milestones(milestone_interim, milestone_final)
+
+controller_obj <- controller(trial_obj, listener_obj)
+controller_obj$run(plot_event = FALSE)
+```
+
+## 5. 读取锁库数据并做基础校验
+
+```{r}
+locked_interim <- trial_obj$get_locked_data("interim")
+locked_final   <- trial_obj$get_locked_data("final")
+
+head(locked_interim)
+head(locked_final)
+
+all(locked_final$OS >= locked_final$PFS, na.rm = TRUE)
+with(locked_final, stats::cor(PFS, OS, use = "complete.obs"))
+
+with(subset(locked_final, arm == "placebo"), mean(ORR, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(ORR, na.rm = TRUE))
+
+with(subset(locked_final, arm == "placebo"), mean(BIOM, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(BIOM, na.rm = TRUE))
+
+with(locked_final, tapply(PFS_event, arm, mean, na.rm = TRUE))
+with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
+
+with(locked_final, tapply(is.na(ORR), arm, mean))
+with(locked_final, tapply(is.na(BIOM), arm, mean))
+```
+

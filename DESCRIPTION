@@ -14,6 +14,10 @@ Imports:
     simdata
 Suggests:
     testthat (>= 3.0.0),
-    VineCopula
+    VineCopula,
+    knitr,
+    rmarkdown,
+    TrialSimulator
 Config/testthat/edition: 3
+VignetteBuilder: knitr
 

@@ -1,0 +1,290 @@
+---
+title: "Archimedean Copula → TrialSimulator：端到端示例（Gumbel）"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Archimedean Copula to TrialSimulator (Gumbel)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r, echo = FALSE, results = "asis"}
+cat(
+  "<style>\n",
+  "pre.sourceCode { background-color: #f7f7f7; }\n",
+  "pre > code.sourceCode > span { display: block; }\n",
+  "</style>\n",
+  sep = ""
+)
+```
+
+本 vignette 展示如何把 `simdatacopulas`（阿基米德 copula）生成的“可控尾部依赖 + 任意边缘”的联合生成器，封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+
+1. 定义 endpoints / arms / trial
+2. 设置里程碑（milestones）并运行
+3. 读取锁库数据（locked data）并做基础校验
+
+本示例使用 Gumbel copula（典型特征：上尾依赖更强）。
+
+## 1. 加载依赖
+
+```{r}
+library(simdata)
+library(simdatacopulas)
+library(TrialSimulator)
+```
+
+## 2. 用 Gumbel copula 构造联合生成器（阿基米德）
+
+阿基米德 copula 常用于刻画非对称尾部依赖：
+
+- Clayton：下尾依赖更强
+- Gumbel：上尾依赖更强
+- Frank：对称依赖（通常无尾依赖）
+- Joe：上尾依赖（通常更尖锐）
+
+本例构造 4 维相关结构：
+
+- `PFS_raw`：PFS 的原始生存时间（正数）
+- `OS_extra`：PFS 之后额外存活时间（正数）
+- `BIOM_latent`：连续 biomarker
+- `ORR_latent`：latent 正态，后续阈值化为二分类 ORR
+
+### 2.1 copula 参数
+
+对 Gumbel copula：`theta >= 1`，`theta` 越大依赖越强，上尾联动越明显。
+
+```{r}
+d <- 4
+theta <- 2.0
+```
+
+### 2.2 placebo 与 treatment 的边缘分布
+
+两组使用相同的 Gumbel copula（相同 `theta`），但边缘分布参数不同，用于表达“治疗效果”。
+
+```{r}
+dist_pbo <- list(
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(6),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0)
+)
+
+dist_trt <- list(
+  function(u) stats::qlnorm(u, meanlog = log(10), sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = -0.3,       sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0.5,        sd = 1.0)
+)
+```
+
+### 2.3 构造 `simdesign`
+
+```{r}
+design_pbo <- simdesign_gumbel_copula(
+  dist        = dist_pbo,
+  theta       = theta,
+  dim         = d,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent")
+)
+
+design_trt <- simdesign_gumbel_copula(
+  dist        = dist_trt,
+  theta       = theta,
+  dim         = d,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent")
+)
+```
+
+## 3. 将 `simdesign` 封装成 TrialSimulator 的 `generator(n)`
+
+TrialSimulator 对 endpoint generator 的“硬性协议”要点：
+
+- 第一个参数名必须是 `n`
+- 返回值必须是长度 `n` 的向量，或 `n` 行的 `data.frame`
+- 对 TTE 类型 endpoint：必须包含 `<name>_event` 列
+- 对 non-tte 类型 endpoint：列名必须与 `endpoint(name=...)` 中一致；并需要 `readout`
+
+本例封装逻辑：
+
+- 先用 `simdata::simulate_data(design, n_obs = n)` 生成一批相关变量
+- 构造：
+  - `PFS = PFS_raw`
+  - `OS = PFS_raw + OS_extra`（保证 `OS >= PFS`）
+  - `*_event` 初始都置为 1（TrialSimulator 会在锁库时点根据 dropout/duration 再做删失截尾）
+  - `ORR` 由 `ORR_latent > cutoff` 得到 0/1
+  - `BIOM` 直接使用 `BIOM_latent`
+
+```{r}
+make_archimedean_endpoint_rng <- function(design, orr_cutoff) {
+  function(n) {
+    latent <- simdata::simulate_data(design, n_obs = n)
+
+    pfs_raw  <- latent[["PFS_raw"]]
+    os_extra <- latent[["OS_extra"]]
+
+    PFS <- pfs_raw
+    OS  <- pfs_raw + os_extra
+
+    data.frame(
+      PFS       = PFS,
+      PFS_event = rep(1L, n),
+      OS        = OS,
+      OS_event  = rep(1L, n),
+      ORR       = as.integer(latent[["ORR_latent"]] > orr_cutoff),
+      BIOM      = latent[["BIOM_latent"]]
+    )
+  }
+}
+
+rng_pbo <- make_archimedean_endpoint_rng(
+  design = design_pbo,
+  orr_cutoff = stats::qnorm(0.6)
+)
+
+rng_trt <- make_archimedean_endpoint_rng(
+  design = design_trt,
+  orr_cutoff = stats::qnorm(0.4)
+)
+
+head(rng_pbo(n = 3))
+head(rng_trt(n = 3))
+```
+
+## 4. 定义 endpoints 与 arms
+
+我们定义 4 个终点：
+
+- `PFS`, `OS`：TTE
+- `ORR`, `BIOM`：non-tte
+
+并指定 non-tte 的读出时间（`readout`）：
+
+- `ORR`：第 6 月读出
+- `BIOM`：基线可得（0）
+
+```{r}
+ep_pbo <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_pbo
+)
+
+ep_trt <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_trt
+)
+
+arm_pbo <- arm(name = "placebo")
+arm_pbo$add_endpoints(ep_pbo)
+
+arm_trt <- arm(name = "treatment")
+arm_trt$add_endpoints(ep_trt)
+```
+
+## 5. 定义试验并运行
+
+这里用两条简单的 wrapper 函数定义入组与脱落时间（指数分布）：
+
+- `enroller_fn(n)`：生成每位患者的入组等待时间
+- `dropout_fn(n)`：生成每位患者从入组开始算起的脱落时长
+
+```{r}
+set.seed(20251230)
+
+enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
+dropout_fn  <- function(n) stats::rexp(n, rate = log(2) / 40)
+
+trial_obj <- trial(
+  name       = "archimedean-gumbel-demo",
+  n_patients = 400,
+  duration   = 36,
+  enroller   = enroller_fn,
+  dropout    = dropout_fn,
+  seed       = 20251230,
+  silent     = TRUE
+)
+
+trial_obj$add_arms(sample_ratio = c(1, 1), arm_pbo, arm_trt)
+
+milestone_interim <- milestone(
+  name   = "interim",
+  when   = eventNumber(endpoint = "PFS", n = 100),
+  action = doNothing
+)
+
+milestone_final <- milestone(
+  name   = "final",
+  when   = calendarTime(time = 36),
+  action = doNothing
+)
+
+listener_obj <- listener()
+listener_obj$add_milestones(milestone_interim, milestone_final)
+
+controller_obj <- controller(trial_obj, listener_obj)
+controller_obj$run(plot_event = FALSE)
+```
+
+## 6. 读取锁库数据并做基础校验
+
+```{r}
+locked_interim <- trial_obj$get_locked_data("interim")
+locked_final   <- trial_obj$get_locked_data("final")
+
+head(locked_interim)
+head(locked_final)
+```
+
+### 6.1 关键一致性检查
+
+1. `OS >= PFS`（由生成规则保证；TrialSimulator 做删失/截尾后仍应保持）
+2. `cor(PFS, OS)`（应明显大于 0）
+3. placebo vs treatment 的 ORR/BIOM 差异（应体现你设定的边缘差异）
+
+```{r}
+all(locked_final$OS >= locked_final$PFS, na.rm = TRUE)
+
+with(locked_final, stats::cor(PFS, OS, use = "complete.obs"))
+
+with(subset(locked_final, arm == "placebo"), mean(ORR, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(ORR, na.rm = TRUE))
+
+with(subset(locked_final, arm == "placebo"), mean(BIOM, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(BIOM, na.rm = TRUE))
+```
+
+### 6.2 删失与缺失比例
+
+- 对 TTE：`*_event = 0` 通常表示在锁库时点仍未观察到事件（随访截止/脱落导致删失）
+- 对 non-tte：如果锁库时点尚未到达 readout，或患者已脱落，则该变量可能为 `NA`
+
+```{r}
+with(locked_final, tapply(PFS_event, arm, mean, na.rm = TRUE))
+with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
+
+with(locked_final, tapply(is.na(ORR), arm, mean))
+with(locked_final, tapply(is.na(BIOM), arm, mean))
+```
+
+## 7. 切换 copula 家族（同一套 TrialSimulator 对接方式）
+
+只需要把第 2.3 节的 `simdesign_gumbel_copula(...)` 换成其他家族即可：
+
+- 下尾依赖更强：`simdesign_clayton_copula(dist, theta, dim, ...)`
+- 对称依赖：`simdesign_frank_copula(dist, theta, dim, ...)`
+- 上尾依赖：`simdesign_joe_copula(dist, theta, dim, ...)`
+
+封装成 `generator(n)`、以及 TrialSimulator 的 endpoints/arms/trial 设置不需要改变。

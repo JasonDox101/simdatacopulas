@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Vine Copula → TrialSimulator：端到端示例（R-vine）</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Vine Copula →
+TrialSimulator：端到端示例（R-vine）</h1>
+
+
+
+<style>
+pre.sourceCode { background-color: #f7f7f7; }
+pre > code.sourceCode > span { display: block; }
+</style>
+<p>本 vignette 展示如何把 <code>simdatacopulas</code> 的 vine
+copula（C-vine / D-vine / R-vine）联合生成器封装成
+<code>TrialSimulator</code> 需要的
+<code>generator(n)</code>，并完成：</p>
+<ol style="list-style-type: decimal">
+<li>用 <code>VineCopula</code> 拟合（或指定）vine 依赖结构</li>
+<li>用你指定的边缘分位数函数（<code>dist</code>）控制边缘分布</li>
+<li>接入 TrialSimulator 并运行 milestones / 锁库 / 读取 locked data</li>
+</ol>
+<p>本示例使用 R-vine（最通用、结构最灵活）。</p>
+<div id="加载依赖" class="section level2">
+<h2>1. 加载依赖</h2>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a><span class="fu">library</span>(simdata)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">library</span>(simdatacopulas)</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a><span class="fu">library</span>(TrialSimulator)</span></code></pre></div>
+<p>本 vignette 需要 <code>VineCopula</code> 与 <code>copula</code>：</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="fu">library</span>(VineCopula)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="fu">library</span>(copula)</span></code></pre></div>
+</div>
+<div id="构造拟合-vine-依赖结构" class="section level2">
+<h2>2. 构造/拟合 vine 依赖结构</h2>
+<p>为了可复现，我们先用一个 4 维 Gaussian copula 生成一份伪观测
+<code>u_pilot</code>，再用 <code>RVineStructureSelect()</code> 拟合出
+R-vine 结构（在你的真实项目中，你也可以直接把 <code>u_pilot</code>
+换成从历史数据 <code>pobs()</code> 得到的伪观测）。</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">20251230</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a></span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>d <span class="ot">&lt;-</span> <span class="dv">4</span><span class="dt">L</span></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a>n_pilot <span class="ot">&lt;-</span> <span class="dv">2000</span><span class="dt">L</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>cop_true <span class="ot">&lt;-</span> copula<span class="sc">::</span><span class="fu">normalCopula</span>(<span class="at">param =</span> <span class="fl">0.6</span>, <span class="at">dim =</span> d, <span class="at">dispstr =</span> <span class="st">&quot;ex&quot;</span>)</span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>u_pilot <span class="ot">&lt;-</span> copula<span class="sc">::</span><span class="fu">rCopula</span>(n_pilot, cop_true)</span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a>u_pilot <span class="ot">&lt;-</span> <span class="fu">pmin</span>(<span class="fu">pmax</span>(u_pilot, <span class="fl">1e-6</span>), <span class="dv">1</span> <span class="sc">-</span> <span class="fl">1e-6</span>)</span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a></span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a>vine_fit <span class="ot">&lt;-</span> VineCopula<span class="sc">::</span><span class="fu">RVineStructureSelect</span>(</span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a>  <span class="at">data =</span> u_pilot,</span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a>  <span class="at">familyset =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">6</span>,</span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a>  <span class="at">indeptest =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a>  <span class="at">selectioncrit =</span> <span class="st">&quot;AIC&quot;</span>,</span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">&quot;mle&quot;</span></span>
+<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a>)</span></code></pre></div>
+</div>
+<div id="定义边缘分布dist并构造-simdesign" class="section level2">
+<h2>3. 定义边缘分布（dist）并构造 <code>simdesign</code></h2>
+<p>我们构造 4 个相关变量：</p>
+<ul>
+<li><code>PFS_raw</code>：PFS 的原始生存时间（正数）</li>
+<li><code>OS_extra</code>：PFS 之后额外存活时间（正数）</li>
+<li><code>BIOM_latent</code>：连续 biomarker</li>
+<li><code>ORR_latent</code>：latent 正态，后续阈值化为二分类 ORR</li>
+</ul>
+<p>placebo 与 treatment 使用相同的 vine
+依赖结构，但边缘分布参数不同，用于表达“治疗效果”。</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>dist_pbo <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qlnorm</span>(u, <span class="at">meanlog =</span> <span class="fu">log</span>(<span class="dv">8</span>),  <span class="at">sdlog =</span> <span class="fl">0.55</span>),</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qlnorm</span>(u, <span class="at">meanlog =</span> <span class="fu">log</span>(<span class="dv">6</span>),  <span class="at">sdlog =</span> <span class="fl">0.55</span>),</span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qnorm</span>(u,  <span class="at">mean =</span> <span class="dv">0</span>,         <span class="at">sd =</span> <span class="fl">1.0</span>),</span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qnorm</span>(u,  <span class="at">mean =</span> <span class="dv">0</span>,         <span class="at">sd =</span> <span class="fl">1.0</span>)</span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a>)</span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a></span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a>dist_trt <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qlnorm</span>(u, <span class="at">meanlog =</span> <span class="fu">log</span>(<span class="dv">10</span>), <span class="at">sdlog =</span> <span class="fl">0.55</span>),</span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qlnorm</span>(u, <span class="at">meanlog =</span> <span class="fu">log</span>(<span class="dv">8</span>),  <span class="at">sdlog =</span> <span class="fl">0.55</span>),</span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qnorm</span>(u,  <span class="at">mean =</span> <span class="sc">-</span><span class="fl">0.3</span>,       <span class="at">sd =</span> <span class="fl">1.0</span>),</span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a>  <span class="cf">function</span>(u) stats<span class="sc">::</span><span class="fu">qnorm</span>(u,  <span class="at">mean =</span> <span class="fl">0.5</span>,        <span class="at">sd =</span> <span class="fl">1.0</span>)</span>
+<span id="cb4-13"><a href="#cb4-13" tabindex="-1"></a>)</span>
+<span id="cb4-14"><a href="#cb4-14" tabindex="-1"></a></span>
+<span id="cb4-15"><a href="#cb4-15" tabindex="-1"></a>design_pbo <span class="ot">&lt;-</span> <span class="fu">simdesign_vine_copula</span>(</span>
+<span id="cb4-16"><a href="#cb4-16" tabindex="-1"></a>  <span class="at">vine        =</span> vine_fit,</span>
+<span id="cb4-17"><a href="#cb4-17" tabindex="-1"></a>  <span class="at">dist        =</span> dist_pbo,</span>
+<span id="cb4-18"><a href="#cb4-18" tabindex="-1"></a>  <span class="at">names_final =</span> <span class="fu">c</span>(<span class="st">&quot;PFS_raw&quot;</span>, <span class="st">&quot;OS_extra&quot;</span>, <span class="st">&quot;BIOM_latent&quot;</span>, <span class="st">&quot;ORR_latent&quot;</span>),</span>
+<span id="cb4-19"><a href="#cb4-19" tabindex="-1"></a>  <span class="at">eps         =</span> <span class="fl">1e-6</span></span>
+<span id="cb4-20"><a href="#cb4-20" tabindex="-1"></a>)</span>
+<span id="cb4-21"><a href="#cb4-21" tabindex="-1"></a></span>
+<span id="cb4-22"><a href="#cb4-22" tabindex="-1"></a>design_trt <span class="ot">&lt;-</span> <span class="fu">simdesign_vine_copula</span>(</span>
+<span id="cb4-23"><a href="#cb4-23" tabindex="-1"></a>  <span class="at">vine        =</span> vine_fit,</span>
+<span id="cb4-24"><a href="#cb4-24" tabindex="-1"></a>  <span class="at">dist        =</span> dist_trt,</span>
+<span id="cb4-25"><a href="#cb4-25" tabindex="-1"></a>  <span class="at">names_final =</span> <span class="fu">c</span>(<span class="st">&quot;PFS_raw&quot;</span>, <span class="st">&quot;OS_extra&quot;</span>, <span class="st">&quot;BIOM_latent&quot;</span>, <span class="st">&quot;ORR_latent&quot;</span>),</span>
+<span id="cb4-26"><a href="#cb4-26" tabindex="-1"></a>  <span class="at">eps         =</span> <span class="fl">1e-6</span></span>
+<span id="cb4-27"><a href="#cb4-27" tabindex="-1"></a>)</span></code></pre></div>
+</div>
+<div id="封装成-trialsimulator-的-generatorn" class="section level2">
+<h2>4. 封装成 TrialSimulator 的 <code>generator(n)</code></h2>
+<p>TrialSimulator 对 endpoint generator 的协议要点：</p>
+<ul>
+<li>第一个参数名必须是 <code>n</code></li>
+<li>返回 <code>data.frame</code> 且有 <code>n</code> 行</li>
+<li>对 TTE：必须提供 <code>&lt;name&gt;_event</code> 列</li>
+<li>对 non-tte：必须提供 <code>readout</code></li>
+</ul>
+<p>本例构造 4 个终点：</p>
+<ul>
+<li><code>PFS</code>, <code>OS</code>：TTE，其中
+<code>OS = PFS + extra</code> 保证 <code>OS &gt;= PFS</code></li>
+<li><code>ORR</code>：二分类 non-tte，由 <code>ORR_latent</code>
+阈值化得到</li>
+<li><code>BIOM</code>：连续 non-tte</li>
+</ul>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>make_vine_endpoint_rng <span class="ot">&lt;-</span> <span class="cf">function</span>(design, orr_cutoff) {</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  <span class="cf">function</span>(n) {</span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>    latent <span class="ot">&lt;-</span> simdata<span class="sc">::</span><span class="fu">simulate_data</span>(design, <span class="at">n_obs =</span> n)</span>
+<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a></span>
+<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a>    pfs_raw  <span class="ot">&lt;-</span> latent[[<span class="st">&quot;PFS_raw&quot;</span>]]</span>
+<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>    os_extra <span class="ot">&lt;-</span> latent[[<span class="st">&quot;OS_extra&quot;</span>]]</span>
+<span id="cb5-7"><a href="#cb5-7" tabindex="-1"></a></span>
+<span id="cb5-8"><a href="#cb5-8" tabindex="-1"></a>    PFS <span class="ot">&lt;-</span> pfs_raw</span>
+<span id="cb5-9"><a href="#cb5-9" tabindex="-1"></a>    OS  <span class="ot">&lt;-</span> pfs_raw <span class="sc">+</span> os_extra</span>
+<span id="cb5-10"><a href="#cb5-10" tabindex="-1"></a></span>
+<span id="cb5-11"><a href="#cb5-11" tabindex="-1"></a>    <span class="fu">data.frame</span>(</span>
+<span id="cb5-12"><a href="#cb5-12" tabindex="-1"></a>      <span class="at">PFS       =</span> PFS,</span>
+<span id="cb5-13"><a href="#cb5-13" tabindex="-1"></a>      <span class="at">PFS_event =</span> <span class="fu">rep</span>(<span class="dv">1</span><span class="dt">L</span>, n),</span>
+<span id="cb5-14"><a href="#cb5-14" tabindex="-1"></a>      <span class="at">OS        =</span> OS,</span>
+<span id="cb5-15"><a href="#cb5-15" tabindex="-1"></a>      <span class="at">OS_event  =</span> <span class="fu">rep</span>(<span class="dv">1</span><span class="dt">L</span>, n),</span>
+<span id="cb5-16"><a href="#cb5-16" tabindex="-1"></a>      <span class="at">ORR       =</span> <span class="fu">as.integer</span>(latent[[<span class="st">&quot;ORR_latent&quot;</span>]] <span class="sc">&gt;</span> orr_cutoff),</span>
+<span id="cb5-17"><a href="#cb5-17" tabindex="-1"></a>      <span class="at">BIOM      =</span> latent[[<span class="st">&quot;BIOM_latent&quot;</span>]]</span>
+<span id="cb5-18"><a href="#cb5-18" tabindex="-1"></a>    )</span>
+<span id="cb5-19"><a href="#cb5-19" tabindex="-1"></a>  }</span>
+<span id="cb5-20"><a href="#cb5-20" tabindex="-1"></a>}</span>
+<span id="cb5-21"><a href="#cb5-21" tabindex="-1"></a></span>
+<span id="cb5-22"><a href="#cb5-22" tabindex="-1"></a>rng_pbo <span class="ot">&lt;-</span> <span class="fu">make_vine_endpoint_rng</span>(design_pbo, <span class="at">orr_cutoff =</span> stats<span class="sc">::</span><span class="fu">qnorm</span>(<span class="fl">0.6</span>))</span>
+<span id="cb5-23"><a href="#cb5-23" tabindex="-1"></a>rng_trt <span class="ot">&lt;-</span> <span class="fu">make_vine_endpoint_rng</span>(design_trt, <span class="at">orr_cutoff =</span> stats<span class="sc">::</span><span class="fu">qnorm</span>(<span class="fl">0.4</span>))</span>
+<span id="cb5-24"><a href="#cb5-24" tabindex="-1"></a></span>
+<span id="cb5-25"><a href="#cb5-25" tabindex="-1"></a><span class="fu">head</span>(<span class="fu">rng_pbo</span>(<span class="at">n =</span> <span class="dv">3</span>))</span>
+<span id="cb5-26"><a href="#cb5-26" tabindex="-1"></a><span class="co">#&gt;         PFS PFS_event       OS OS_event ORR       BIOM</span></span>
+<span id="cb5-27"><a href="#cb5-27" tabindex="-1"></a><span class="co">#&gt; 1  8.155720         1 12.93057        1   1  0.9028660</span></span>
+<span id="cb5-28"><a href="#cb5-28" tabindex="-1"></a><span class="co">#&gt; 2  8.305841         1 15.63475        1   0 -1.6189286</span></span>
+<span id="cb5-29"><a href="#cb5-29" tabindex="-1"></a><span class="co">#&gt; 3 13.773434         1 24.75251        1   0  0.2243086</span></span>
+<span id="cb5-30"><a href="#cb5-30" tabindex="-1"></a><span class="fu">head</span>(<span class="fu">rng_trt</span>(<span class="at">n =</span> <span class="dv">3</span>))</span>
+<span id="cb5-31"><a href="#cb5-31" tabindex="-1"></a><span class="co">#&gt;         PFS PFS_event       OS OS_event ORR       BIOM</span></span>
+<span id="cb5-32"><a href="#cb5-32" tabindex="-1"></a><span class="co">#&gt; 1  9.197557         1 18.24362        1   1  0.2309611</span></span>
+<span id="cb5-33"><a href="#cb5-33" tabindex="-1"></a><span class="co">#&gt; 2 12.248595         1 18.41407        1   1 -1.0793190</span></span>
+<span id="cb5-34"><a href="#cb5-34" tabindex="-1"></a><span class="co">#&gt; 3  6.185545         1 10.00718        1   1 -1.4667484</span></span></code></pre></div>
+</div>
+<div id="trialsimulator定义-endpointsarmstrialmilestones-并运行" class="section level2">
+<h2>5. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行</h2>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>enroller_fn <span class="ot">&lt;-</span> <span class="cf">function</span>(n) stats<span class="sc">::</span><span class="fu">rexp</span>(n, <span class="at">rate =</span> <span class="fu">log</span>(<span class="dv">2</span>) <span class="sc">/</span> <span class="dv">4</span>)</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>dropout_fn  <span class="ot">&lt;-</span> <span class="cf">function</span>(n) stats<span class="sc">::</span><span class="fu">rexp</span>(n, <span class="at">rate =</span> <span class="fu">log</span>(<span class="dv">2</span>) <span class="sc">/</span> <span class="dv">40</span>)</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>ep_pbo <span class="ot">&lt;-</span> <span class="fu">endpoint</span>(</span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a>  <span class="at">name      =</span> <span class="fu">c</span>(<span class="st">&quot;PFS&quot;</span>, <span class="st">&quot;OS&quot;</span>, <span class="st">&quot;ORR&quot;</span>, <span class="st">&quot;BIOM&quot;</span>),</span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a>  <span class="at">type      =</span> <span class="fu">c</span>(<span class="st">&quot;tte&quot;</span>, <span class="st">&quot;tte&quot;</span>, <span class="st">&quot;non-tte&quot;</span>, <span class="st">&quot;non-tte&quot;</span>),</span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a>  <span class="at">readout   =</span> <span class="fu">c</span>(<span class="at">ORR =</span> <span class="dv">6</span>, <span class="at">BIOM =</span> <span class="dv">0</span>),</span>
+<span id="cb6-8"><a href="#cb6-8" tabindex="-1"></a>  <span class="at">generator =</span> rng_pbo</span>
+<span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>)</span>
+<span id="cb6-10"><a href="#cb6-10" tabindex="-1"></a></span>
+<span id="cb6-11"><a href="#cb6-11" tabindex="-1"></a>ep_trt <span class="ot">&lt;-</span> <span class="fu">endpoint</span>(</span>
+<span id="cb6-12"><a href="#cb6-12" tabindex="-1"></a>  <span class="at">name      =</span> <span class="fu">c</span>(<span class="st">&quot;PFS&quot;</span>, <span class="st">&quot;OS&quot;</span>, <span class="st">&quot;ORR&quot;</span>, <span class="st">&quot;BIOM&quot;</span>),</span>
+<span id="cb6-13"><a href="#cb6-13" tabindex="-1"></a>  <span class="at">type      =</span> <span class="fu">c</span>(<span class="st">&quot;tte&quot;</span>, <span class="st">&quot;tte&quot;</span>, <span class="st">&quot;non-tte&quot;</span>, <span class="st">&quot;non-tte&quot;</span>),</span>
+<span id="cb6-14"><a href="#cb6-14" tabindex="-1"></a>  <span class="at">readout   =</span> <span class="fu">c</span>(<span class="at">ORR =</span> <span class="dv">6</span>, <span class="at">BIOM =</span> <span class="dv">0</span>),</span>
+<span id="cb6-15"><a href="#cb6-15" tabindex="-1"></a>  <span class="at">generator =</span> rng_trt</span>
+<span id="cb6-16"><a href="#cb6-16" tabindex="-1"></a>)</span>
+<span id="cb6-17"><a href="#cb6-17" tabindex="-1"></a></span>
+<span id="cb6-18"><a href="#cb6-18" tabindex="-1"></a>arm_pbo <span class="ot">&lt;-</span> <span class="fu">arm</span>(<span class="at">name =</span> <span class="st">&quot;placebo&quot;</span>)</span>
+<span id="cb6-19"><a href="#cb6-19" tabindex="-1"></a>arm_pbo<span class="sc">$</span><span class="fu">add_endpoints</span>(ep_pbo)</span>
+<span id="cb6-20"><a href="#cb6-20" tabindex="-1"></a></span>
+<span id="cb6-21"><a href="#cb6-21" tabindex="-1"></a>arm_trt <span class="ot">&lt;-</span> <span class="fu">arm</span>(<span class="at">name =</span> <span class="st">&quot;treatment&quot;</span>)</span>
+<span id="cb6-22"><a href="#cb6-22" tabindex="-1"></a>arm_trt<span class="sc">$</span><span class="fu">add_endpoints</span>(ep_trt)</span>
+<span id="cb6-23"><a href="#cb6-23" tabindex="-1"></a></span>
+<span id="cb6-24"><a href="#cb6-24" tabindex="-1"></a>trial_obj <span class="ot">&lt;-</span> <span class="fu">trial</span>(</span>
+<span id="cb6-25"><a href="#cb6-25" tabindex="-1"></a>  <span class="at">name       =</span> <span class="st">&quot;vine-copula-demo&quot;</span>,</span>
+<span id="cb6-26"><a href="#cb6-26" tabindex="-1"></a>  <span class="at">n_patients =</span> <span class="dv">400</span>,</span>
+<span id="cb6-27"><a href="#cb6-27" tabindex="-1"></a>  <span class="at">duration   =</span> <span class="dv">36</span>,</span>
+<span id="cb6-28"><a href="#cb6-28" tabindex="-1"></a>  <span class="at">enroller   =</span> enroller_fn,</span>
+<span id="cb6-29"><a href="#cb6-29" tabindex="-1"></a>  <span class="at">dropout    =</span> dropout_fn,</span>
+<span id="cb6-30"><a href="#cb6-30" tabindex="-1"></a>  <span class="at">seed       =</span> <span class="dv">20251230</span>,</span>
+<span id="cb6-31"><a href="#cb6-31" tabindex="-1"></a>  <span class="at">silent     =</span> <span class="cn">TRUE</span></span>
+<span id="cb6-32"><a href="#cb6-32" tabindex="-1"></a>)</span>
+<span id="cb6-33"><a href="#cb6-33" tabindex="-1"></a>trial_obj<span class="sc">$</span><span class="fu">add_arms</span>(<span class="at">sample_ratio =</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">1</span>), arm_pbo, arm_trt)</span>
+<span id="cb6-34"><a href="#cb6-34" tabindex="-1"></a></span>
+<span id="cb6-35"><a href="#cb6-35" tabindex="-1"></a>milestone_interim <span class="ot">&lt;-</span> <span class="fu">milestone</span>(</span>
+<span id="cb6-36"><a href="#cb6-36" tabindex="-1"></a>  <span class="at">name   =</span> <span class="st">&quot;interim&quot;</span>,</span>
+<span id="cb6-37"><a href="#cb6-37" tabindex="-1"></a>  <span class="at">when   =</span> <span class="fu">eventNumber</span>(<span class="at">endpoint =</span> <span class="st">&quot;PFS&quot;</span>, <span class="at">n =</span> <span class="dv">100</span>),</span>
+<span id="cb6-38"><a href="#cb6-38" tabindex="-1"></a>  <span class="at">action =</span> doNothing</span>
+<span id="cb6-39"><a href="#cb6-39" tabindex="-1"></a>)</span>
+<span id="cb6-40"><a href="#cb6-40" tabindex="-1"></a></span>
+<span id="cb6-41"><a href="#cb6-41" tabindex="-1"></a>milestone_final <span class="ot">&lt;-</span> <span class="fu">milestone</span>(</span>
+<span id="cb6-42"><a href="#cb6-42" tabindex="-1"></a>  <span class="at">name   =</span> <span class="st">&quot;final&quot;</span>,</span>
+<span id="cb6-43"><a href="#cb6-43" tabindex="-1"></a>  <span class="at">when   =</span> <span class="fu">calendarTime</span>(<span class="at">time =</span> <span class="dv">36</span>),</span>
+<span id="cb6-44"><a href="#cb6-44" tabindex="-1"></a>  <span class="at">action =</span> doNothing</span>
+<span id="cb6-45"><a href="#cb6-45" tabindex="-1"></a>)</span>
+<span id="cb6-46"><a href="#cb6-46" tabindex="-1"></a></span>
+<span id="cb6-47"><a href="#cb6-47" tabindex="-1"></a>listener_obj <span class="ot">&lt;-</span> <span class="fu">listener</span>()</span>
+<span id="cb6-48"><a href="#cb6-48" tabindex="-1"></a>listener_obj<span class="sc">$</span><span class="fu">add_milestones</span>(milestone_interim, milestone_final)</span>
+<span id="cb6-49"><a href="#cb6-49" tabindex="-1"></a></span>
+<span id="cb6-50"><a href="#cb6-50" tabindex="-1"></a>controller_obj <span class="ot">&lt;-</span> <span class="fu">controller</span>(trial_obj, listener_obj)</span>
+<span id="cb6-51"><a href="#cb6-51" tabindex="-1"></a>controller_obj<span class="sc">$</span><span class="fu">run</span>(<span class="at">plot_event =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+</div>
+<div id="读取锁库数据并做基础校验" class="section level2">
+<h2>6. 读取锁库数据并做基础校验</h2>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>locked_interim <span class="ot">&lt;-</span> trial_obj<span class="sc">$</span><span class="fu">get_locked_data</span>(<span class="st">&quot;interim&quot;</span>)</span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>locked_final   <span class="ot">&lt;-</span> trial_obj<span class="sc">$</span><span class="fu">get_locked_data</span>(<span class="st">&quot;final&quot;</span>)</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a><span class="fu">head</span>(locked_interim)</span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a><span class="co">#&gt;   patient_id       arm enroll_time dropout_time        PFS PFS_event         OS OS_event ORR</span></span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a><span class="co">#&gt; 1          1   placebo  0.02066698   43.2488322 10.6722834         0 10.6722834        0   1</span></span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a><span class="co">#&gt; 2          2 treatment  0.03035552    0.5250303  0.5250303         0  0.5250303        0  NA</span></span>
+<span id="cb7-8"><a href="#cb7-8" tabindex="-1"></a><span class="co">#&gt; 3          3 treatment  0.04578310    3.0614396  3.0614396         0  3.0614396        0  NA</span></span>
+<span id="cb7-9"><a href="#cb7-9" tabindex="-1"></a><span class="co">#&gt; 4          4   placebo  0.04850900   20.6731981 10.1673188         1 10.6444414        0   0</span></span>
+<span id="cb7-10"><a href="#cb7-10" tabindex="-1"></a><span class="co">#&gt; 5          5 treatment  0.05451189   66.7498215 10.6384385         0 10.6384385        0   1</span></span>
+<span id="cb7-11"><a href="#cb7-11" tabindex="-1"></a><span class="co">#&gt; 6          6   placebo  0.06525064   28.8290380  8.7106855         1 10.6276998        0   0</span></span>
+<span id="cb7-12"><a href="#cb7-12" tabindex="-1"></a><span class="co">#&gt;          BIOM ORR_readout BIOM_readout</span></span>
+<span id="cb7-13"><a href="#cb7-13" tabindex="-1"></a><span class="co">#&gt; 1  0.99663493           6            0</span></span>
+<span id="cb7-14"><a href="#cb7-14" tabindex="-1"></a><span class="co">#&gt; 2 -0.02009753           6            0</span></span>
+<span id="cb7-15"><a href="#cb7-15" tabindex="-1"></a><span class="co">#&gt; 3 -0.59143205           6            0</span></span>
+<span id="cb7-16"><a href="#cb7-16" tabindex="-1"></a><span class="co">#&gt; 4 -0.73595749           6            0</span></span>
+<span id="cb7-17"><a href="#cb7-17" tabindex="-1"></a><span class="co">#&gt; 5 -0.59858781           6            0</span></span>
+<span id="cb7-18"><a href="#cb7-18" tabindex="-1"></a><span class="co">#&gt; 6  0.25731727           6            0</span></span>
+<span id="cb7-19"><a href="#cb7-19" tabindex="-1"></a><span class="fu">head</span>(locked_final)</span>
+<span id="cb7-20"><a href="#cb7-20" tabindex="-1"></a><span class="co">#&gt;   patient_id       arm enroll_time dropout_time        PFS PFS_event         OS OS_event ORR</span></span>
+<span id="cb7-21"><a href="#cb7-21" tabindex="-1"></a><span class="co">#&gt; 1          1   placebo  0.02066698   43.2488322 16.9589215         1 24.4891176        1   1</span></span>
+<span id="cb7-22"><a href="#cb7-22" tabindex="-1"></a><span class="co">#&gt; 2          2 treatment  0.03035552    0.5250303  0.5250303         0  0.5250303        0  NA</span></span>
+<span id="cb7-23"><a href="#cb7-23" tabindex="-1"></a><span class="co">#&gt; 3          3 treatment  0.04578310    3.0614396  3.0614396         0  3.0614396        0  NA</span></span>
+<span id="cb7-24"><a href="#cb7-24" tabindex="-1"></a><span class="co">#&gt; 4          4   placebo  0.04850900   20.6731981 10.1673188         1 13.7264117        1   0</span></span>
+<span id="cb7-25"><a href="#cb7-25" tabindex="-1"></a><span class="co">#&gt; 5          5 treatment  0.05451189   66.7498215 15.1937215         1 20.0334461        1   1</span></span>
+<span id="cb7-26"><a href="#cb7-26" tabindex="-1"></a><span class="co">#&gt; 6          6   placebo  0.06525064   28.8290380  8.7106855         1 16.2023965        1   0</span></span>
+<span id="cb7-27"><a href="#cb7-27" tabindex="-1"></a><span class="co">#&gt;          BIOM ORR_readout BIOM_readout</span></span>
+<span id="cb7-28"><a href="#cb7-28" tabindex="-1"></a><span class="co">#&gt; 1  0.99663493           6            0</span></span>
+<span id="cb7-29"><a href="#cb7-29" tabindex="-1"></a><span class="co">#&gt; 2 -0.02009753           6            0</span></span>
+<span id="cb7-30"><a href="#cb7-30" tabindex="-1"></a><span class="co">#&gt; 3 -0.59143205           6            0</span></span>
+<span id="cb7-31"><a href="#cb7-31" tabindex="-1"></a><span class="co">#&gt; 4 -0.73595749           6            0</span></span>
+<span id="cb7-32"><a href="#cb7-32" tabindex="-1"></a><span class="co">#&gt; 5 -0.59858781           6            0</span></span>
+<span id="cb7-33"><a href="#cb7-33" tabindex="-1"></a><span class="co">#&gt; 6  0.25731727           6            0</span></span>
+<span id="cb7-34"><a href="#cb7-34" tabindex="-1"></a></span>
+<span id="cb7-35"><a href="#cb7-35" tabindex="-1"></a><span class="fu">all</span>(locked_final<span class="sc">$</span>OS <span class="sc">&gt;=</span> locked_final<span class="sc">$</span>PFS, <span class="at">na.rm =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb7-36"><a href="#cb7-36" tabindex="-1"></a><span class="co">#&gt; [1] TRUE</span></span>
+<span id="cb7-37"><a href="#cb7-37" tabindex="-1"></a><span class="fu">with</span>(locked_final, stats<span class="sc">::</span><span class="fu">cor</span>(PFS, OS, <span class="at">use =</span> <span class="st">&quot;complete.obs&quot;</span>))</span>
+<span id="cb7-38"><a href="#cb7-38" tabindex="-1"></a><span class="co">#&gt; [1] 0.8662546</span></span>
+<span id="cb7-39"><a href="#cb7-39" tabindex="-1"></a></span>
+<span id="cb7-40"><a href="#cb7-40" tabindex="-1"></a><span class="fu">with</span>(<span class="fu">subset</span>(locked_final, arm <span class="sc">==</span> <span class="st">&quot;placebo&quot;</span>), <span class="fu">mean</span>(ORR, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb7-41"><a href="#cb7-41" tabindex="-1"></a><span class="co">#&gt; [1] 0.3646409</span></span>
+<span id="cb7-42"><a href="#cb7-42" tabindex="-1"></a><span class="fu">with</span>(<span class="fu">subset</span>(locked_final, arm <span class="sc">==</span> <span class="st">&quot;treatment&quot;</span>), <span class="fu">mean</span>(ORR, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb7-43"><a href="#cb7-43" tabindex="-1"></a><span class="co">#&gt; [1] 0.7865169</span></span>
+<span id="cb7-44"><a href="#cb7-44" tabindex="-1"></a></span>
+<span id="cb7-45"><a href="#cb7-45" tabindex="-1"></a><span class="fu">with</span>(<span class="fu">subset</span>(locked_final, arm <span class="sc">==</span> <span class="st">&quot;placebo&quot;</span>), <span class="fu">mean</span>(BIOM, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb7-46"><a href="#cb7-46" tabindex="-1"></a><span class="co">#&gt; [1] -0.06704452</span></span>
+<span id="cb7-47"><a href="#cb7-47" tabindex="-1"></a><span class="fu">with</span>(<span class="fu">subset</span>(locked_final, arm <span class="sc">==</span> <span class="st">&quot;treatment&quot;</span>), <span class="fu">mean</span>(BIOM, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb7-48"><a href="#cb7-48" tabindex="-1"></a><span class="co">#&gt; [1] -0.3350763</span></span>
+<span id="cb7-49"><a href="#cb7-49" tabindex="-1"></a></span>
+<span id="cb7-50"><a href="#cb7-50" tabindex="-1"></a><span class="fu">with</span>(locked_final, <span class="fu">tapply</span>(PFS_event, arm, mean, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb7-51"><a href="#cb7-51" tabindex="-1"></a><span class="co">#&gt;   placebo treatment </span></span>
+<span id="cb7-52"><a href="#cb7-52" tabindex="-1"></a><span class="co">#&gt; 0.8291457 0.8040201</span></span>
+<span id="cb7-53"><a href="#cb7-53" tabindex="-1"></a><span class="fu">with</span>(locked_final, <span class="fu">tapply</span>(OS_event,  arm, mean, <span class="at">na.rm =</span> <span class="cn">TRUE</span>))</span>
+<span id="cb7-54"><a href="#cb7-54" tabindex="-1"></a><span class="co">#&gt;   placebo treatment </span></span>
+<span id="cb7-55"><a href="#cb7-55" tabindex="-1"></a><span class="co">#&gt; 0.7135678 0.6331658</span></span>
+<span id="cb7-56"><a href="#cb7-56" tabindex="-1"></a></span>
+<span id="cb7-57"><a href="#cb7-57" tabindex="-1"></a><span class="fu">with</span>(locked_final, <span class="fu">tapply</span>(<span class="fu">is.na</span>(ORR), arm, mean))</span>
+<span id="cb7-58"><a href="#cb7-58" tabindex="-1"></a><span class="co">#&gt;    placebo  treatment </span></span>
+<span id="cb7-59"><a href="#cb7-59" tabindex="-1"></a><span class="co">#&gt; 0.09045226 0.10552764</span></span>
+<span id="cb7-60"><a href="#cb7-60" tabindex="-1"></a><span class="fu">with</span>(locked_final, <span class="fu">tapply</span>(<span class="fu">is.na</span>(BIOM), arm, mean))</span>
+<span id="cb7-61"><a href="#cb7-61" tabindex="-1"></a><span class="co">#&gt;   placebo treatment </span></span>
+<span id="cb7-62"><a href="#cb7-62" tabindex="-1"></a><span class="co">#&gt;         0         0</span></span></code></pre></div>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

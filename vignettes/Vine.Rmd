@@ -1,0 +1,240 @@
+---
+title: "Vine Copula → TrialSimulator：端到端示例（R-vine）"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Vine Copula to TrialSimulator (R-vine)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+```{r, echo = FALSE, results = "asis"}
+cat(
+  "<style>\n",
+  "pre.sourceCode { background-color: #f7f7f7; }\n",
+  "pre > code.sourceCode > span { display: block; }\n",
+  "</style>\n",
+  sep = ""
+)
+```
+
+本 vignette 展示如何把 `simdatacopulas` 的 vine copula（C-vine / D-vine / R-vine）联合生成器封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+
+1. 用 `VineCopula` 拟合（或指定）vine 依赖结构
+2. 用你指定的边缘分位数函数（`dist`）控制边缘分布
+3. 接入 TrialSimulator 并运行 milestones / 锁库 / 读取 locked data
+
+本示例使用 R-vine（最通用、结构最灵活）。
+
+## 1. 加载依赖
+
+```{r}
+library(simdata)
+library(simdatacopulas)
+library(TrialSimulator)
+```
+
+本 vignette 需要 `VineCopula` 与 `copula`：
+
+```{r}
+library(VineCopula)
+library(copula)
+```
+
+## 2. 构造/拟合 vine 依赖结构
+
+为了可复现，我们先用一个 4 维 Gaussian copula 生成一份伪观测 `u_pilot`，再用 `RVineStructureSelect()` 拟合出 R-vine 结构（在你的真实项目中，你也可以直接把 `u_pilot` 换成从历史数据 `pobs()` 得到的伪观测）。
+
+```{r}
+set.seed(20251230)
+
+d <- 4L
+n_pilot <- 2000L
+
+cop_true <- copula::normalCopula(param = 0.6, dim = d, dispstr = "ex")
+u_pilot <- copula::rCopula(n_pilot, cop_true)
+u_pilot <- pmin(pmax(u_pilot, 1e-6), 1 - 1e-6)
+
+vine_fit <- VineCopula::RVineStructureSelect(
+  data = u_pilot,
+  familyset = 1:6,
+  indeptest = TRUE,
+  selectioncrit = "AIC",
+  method = "mle"
+)
+```
+
+## 3. 定义边缘分布（dist）并构造 `simdesign`
+
+我们构造 4 个相关变量：
+
+- `PFS_raw`：PFS 的原始生存时间（正数）
+- `OS_extra`：PFS 之后额外存活时间（正数）
+- `BIOM_latent`：连续 biomarker
+- `ORR_latent`：latent 正态，后续阈值化为二分类 ORR
+
+placebo 与 treatment 使用相同的 vine 依赖结构，但边缘分布参数不同，用于表达“治疗效果”。
+
+```{r}
+dist_pbo <- list(
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(6),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0,         sd = 1.0)
+)
+
+dist_trt <- list(
+  function(u) stats::qlnorm(u, meanlog = log(10), sdlog = 0.55),
+  function(u) stats::qlnorm(u, meanlog = log(8),  sdlog = 0.55),
+  function(u) stats::qnorm(u,  mean = -0.3,       sd = 1.0),
+  function(u) stats::qnorm(u,  mean = 0.5,        sd = 1.0)
+)
+
+design_pbo <- simdesign_vine_copula(
+  vine        = vine_fit,
+  dist        = dist_pbo,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent"),
+  eps         = 1e-6
+)
+
+design_trt <- simdesign_vine_copula(
+  vine        = vine_fit,
+  dist        = dist_trt,
+  names_final = c("PFS_raw", "OS_extra", "BIOM_latent", "ORR_latent"),
+  eps         = 1e-6
+)
+```
+
+## 4. 封装成 TrialSimulator 的 `generator(n)`
+
+TrialSimulator 对 endpoint generator 的协议要点：
+
+- 第一个参数名必须是 `n`
+- 返回 `data.frame` 且有 `n` 行
+- 对 TTE：必须提供 `<name>_event` 列
+- 对 non-tte：必须提供 `readout`
+
+本例构造 4 个终点：
+
+- `PFS`, `OS`：TTE，其中 `OS = PFS + extra` 保证 `OS >= PFS`
+- `ORR`：二分类 non-tte，由 `ORR_latent` 阈值化得到
+- `BIOM`：连续 non-tte
+
+```{r}
+make_vine_endpoint_rng <- function(design, orr_cutoff) {
+  function(n) {
+    latent <- simdata::simulate_data(design, n_obs = n)
+
+    pfs_raw  <- latent[["PFS_raw"]]
+    os_extra <- latent[["OS_extra"]]
+
+    PFS <- pfs_raw
+    OS  <- pfs_raw + os_extra
+
+    data.frame(
+      PFS       = PFS,
+      PFS_event = rep(1L, n),
+      OS        = OS,
+      OS_event  = rep(1L, n),
+      ORR       = as.integer(latent[["ORR_latent"]] > orr_cutoff),
+      BIOM      = latent[["BIOM_latent"]]
+    )
+  }
+}
+
+rng_pbo <- make_vine_endpoint_rng(design_pbo, orr_cutoff = stats::qnorm(0.6))
+rng_trt <- make_vine_endpoint_rng(design_trt, orr_cutoff = stats::qnorm(0.4))
+
+head(rng_pbo(n = 3))
+head(rng_trt(n = 3))
+```
+
+## 5. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行
+
+```{r}
+enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
+dropout_fn  <- function(n) stats::rexp(n, rate = log(2) / 40)
+
+ep_pbo <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_pbo
+)
+
+ep_trt <- endpoint(
+  name      = c("PFS", "OS", "ORR", "BIOM"),
+  type      = c("tte", "tte", "non-tte", "non-tte"),
+  readout   = c(ORR = 6, BIOM = 0),
+  generator = rng_trt
+)
+
+arm_pbo <- arm(name = "placebo")
+arm_pbo$add_endpoints(ep_pbo)
+
+arm_trt <- arm(name = "treatment")
+arm_trt$add_endpoints(ep_trt)
+
+trial_obj <- trial(
+  name       = "vine-copula-demo",
+  n_patients = 400,
+  duration   = 36,
+  enroller   = enroller_fn,
+  dropout    = dropout_fn,
+  seed       = 20251230,
+  silent     = TRUE
+)
+trial_obj$add_arms(sample_ratio = c(1, 1), arm_pbo, arm_trt)
+
+milestone_interim <- milestone(
+  name   = "interim",
+  when   = eventNumber(endpoint = "PFS", n = 100),
+  action = doNothing
+)
+
+milestone_final <- milestone(
+  name   = "final",
+  when   = calendarTime(time = 36),
+  action = doNothing
+)
+
+listener_obj <- listener()
+listener_obj$add_milestones(milestone_interim, milestone_final)
+
+controller_obj <- controller(trial_obj, listener_obj)
+controller_obj$run(plot_event = FALSE)
+```
+
+## 6. 读取锁库数据并做基础校验
+
+```{r}
+locked_interim <- trial_obj$get_locked_data("interim")
+locked_final   <- trial_obj$get_locked_data("final")
+
+head(locked_interim)
+head(locked_final)
+
+all(locked_final$OS >= locked_final$PFS, na.rm = TRUE)
+with(locked_final, stats::cor(PFS, OS, use = "complete.obs"))
+
+with(subset(locked_final, arm == "placebo"), mean(ORR, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(ORR, na.rm = TRUE))
+
+with(subset(locked_final, arm == "placebo"), mean(BIOM, na.rm = TRUE))
+with(subset(locked_final, arm == "treatment"), mean(BIOM, na.rm = TRUE))
+
+with(locked_final, tapply(PFS_event, arm, mean, na.rm = TRUE))
+with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
+
+with(locked_final, tapply(is.na(ORR), arm, mean))
+with(locked_final, tapply(is.na(BIOM), arm, mean))
+```
+
