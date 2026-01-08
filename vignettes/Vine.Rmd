@@ -1,5 +1,5 @@
 ---
-title: "Vine Copula → TrialSimulator：端到端示例（R-vine）"
+title: "Vine Copula → TrialSimulator: End-to-End Example (R-vine)"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Vine Copula to TrialSimulator (R-vine)}
@@ -26,15 +26,15 @@ cat(
 )
 ```
 
-本 vignette 展示如何把 `simdatacopulas` 的 vine copula（C-vine / D-vine / R-vine）联合生成器封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+This vignette demonstrates how to wrap the `simdatacopulas` vine copula (C-vine / D-vine / R-vine) joint generator into the `generator(n)` interface required by `TrialSimulator`, and how to:
 
-1. 用 `VineCopula` 拟合（或指定）vine 依赖结构
-2. 用你指定的边缘分位数函数（`dist`）控制边缘分布
-3. 接入 TrialSimulator 并运行 milestones / 锁库 / 读取 locked data
+1. Fit (or specify) a vine dependence structure using `VineCopula`
+2. Control marginal distributions using your chosen marginal quantile functions (`dist`)
+3. Plug into TrialSimulator and run milestones / database lock / read locked data
 
-本示例使用 R-vine（最通用、结构最灵活）。
+This example uses an R-vine (the most general and structurally flexible form).
 
-## 1. 加载依赖
+## 1. Load Dependencies
 
 ```{r}
 library(simdata)
@@ -42,16 +42,16 @@ library(simdatacopulas)
 library(TrialSimulator)
 ```
 
-本 vignette 需要 `VineCopula` 与 `copula`：
+This vignette also requires `VineCopula` and `copula`:
 
 ```{r}
 library(VineCopula)
 library(copula)
 ```
 
-## 2. 构造/拟合 vine 依赖结构
+## 2. Build/Fit a Vine Dependence Structure
 
-为了可复现，我们先用一个 4 维 Gaussian copula 生成一份伪观测 `u_pilot`，再用 `RVineStructureSelect()` 拟合出 R-vine 结构（在你的真实项目中，你也可以直接把 `u_pilot` 换成从历史数据 `pobs()` 得到的伪观测）。
+For reproducibility, we first generate pseudo-observations `u_pilot` from a 4-dimensional Gaussian copula, then fit an R-vine structure using `RVineStructureSelect()` (in your real project, you can replace `u_pilot` with pseudo-observations obtained from historical data via `pobs()`).
 
 ```{r}
 set.seed(20251230)
@@ -72,16 +72,16 @@ vine_fit <- VineCopula::RVineStructureSelect(
 )
 ```
 
-## 3. 定义边缘分布（dist）并构造 `simdesign`
+## 3. Define Marginals (dist) and Build `simdesign`
 
-我们构造 4 个相关变量：
+We construct 4 correlated variables:
 
-- `PFS_raw`：PFS 的原始生存时间（正数）
-- `OS_extra`：PFS 之后额外存活时间（正数）
-- `BIOM_latent`：连续 biomarker
-- `ORR_latent`：latent 正态，后续阈值化为二分类 ORR
+- `PFS_raw`: raw PFS time-to-event (positive)
+- `OS_extra`: additional survival time after PFS (positive)
+- `BIOM_latent`: continuous biomarker
+- `ORR_latent`: latent normal variable, later thresholded into binary ORR
 
-placebo 与 treatment 使用相同的 vine 依赖结构，但边缘分布参数不同，用于表达“治疗效果”。
+Placebo and treatment share the same vine dependence structure, but use different marginal parameters to represent a "treatment effect".
 
 ```{r}
 dist_pbo <- list(
@@ -113,20 +113,20 @@ design_trt <- simdesign_vine_copula(
 )
 ```
 
-## 4. 封装成 TrialSimulator 的 `generator(n)`
+## 4. Wrap into TrialSimulator `generator(n)`
 
-TrialSimulator 对 endpoint generator 的协议要点：
+Key points of the TrialSimulator endpoint generator contract:
 
-- 第一个参数名必须是 `n`
-- 返回 `data.frame` 且有 `n` 行
-- 对 TTE：必须提供 `<name>_event` 列
-- 对 non-tte：必须提供 `readout`
+- The first argument name must be `n`
+- Return a `data.frame` with `n` rows
+- For TTE: must provide a `<name>_event` column
+- For non-tte: must provide `readout`
 
-本例构造 4 个终点：
+This example constructs 4 endpoints:
 
-- `PFS`, `OS`：TTE，其中 `OS = PFS + extra` 保证 `OS >= PFS`
-- `ORR`：二分类 non-tte，由 `ORR_latent` 阈值化得到
-- `BIOM`：连续 non-tte
+- `PFS`, `OS`: TTE, with `OS = PFS + extra` ensuring `OS >= PFS`
+- `ORR`: binary non-tte, obtained by thresholding `ORR_latent`
+- `BIOM`: continuous non-tte
 
 ```{r}
 make_vine_endpoint_rng <- function(design, orr_cutoff) {
@@ -157,7 +157,7 @@ head(rng_pbo(n = 3))
 head(rng_trt(n = 3))
 ```
 
-## 5. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行
+## 5. TrialSimulator: Define endpoints/arms/trial/milestones and run
 
 ```{r}
 enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
@@ -213,7 +213,7 @@ controller_obj <- controller(trial_obj, listener_obj)
 controller_obj$run(plot_event = FALSE)
 ```
 
-## 6. 读取锁库数据并做基础校验
+## 6. Read Locked Data and Run Basic Checks
 
 ```{r}
 locked_interim <- trial_obj$get_locked_data("interim")
@@ -237,4 +237,3 @@ with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
 with(locked_final, tapply(is.na(ORR), arm, mean))
 with(locked_final, tapply(is.na(BIOM), arm, mean))
 ```
-

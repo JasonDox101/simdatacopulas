@@ -1,5 +1,5 @@
 ---
-title: "Factor Copula → TrialSimulator：端到端示例（Factor Gaussian Copula）"
+title: "Factor Copula → TrialSimulator: End-to-End Example (Factor Gaussian Copula)"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Factor Copula to TrialSimulator (Factor Gaussian Copula)}
@@ -26,13 +26,13 @@ cat(
 )
 ```
 
-本 vignette 展示如何把 `simdatacopulas` 的因子 copula（Factor Gaussian copula）联合生成器封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+This vignette demonstrates how to wrap the `simdatacopulas` factor copula (Factor Gaussian copula) joint generator into the `generator(n)` interface required by `TrialSimulator`, and how to:
 
-1. 用因子结构（`loadings`, `uniq_var`）定义高维相关（低秩 + 对角）
-2. 用你指定的边缘分位数函数（`dist`）控制边缘分布
-3. 接入 TrialSimulator 并运行 milestones / 锁库 / 读取 locked data
+1. Define high-dimensional dependence via a factor structure (`loadings`, `uniq_var`) (low-rank + diagonal)
+2. Control marginal distributions using your chosen marginal quantile functions (`dist`)
+3. Plug into TrialSimulator and run milestones / database lock / read locked data
 
-## 1. 加载依赖
+## 1. Load Dependencies
 
 ```{r}
 library(simdata)
@@ -40,16 +40,16 @@ library(simdatacopulas)
 library(TrialSimulator)
 ```
 
-## 2. 定义因子结构与边缘分布（dist），构造 `simdesign`
+## 2. Define Factor Structure and Marginals (dist), Build `simdesign`
 
-我们构造 4 个相关变量：
+We construct 4 correlated variables:
 
-- `PFS_raw`：PFS 的原始生存时间（正数）
-- `OS_extra`：PFS 之后额外存活时间（正数）
-- `BIOM_latent`：连续 biomarker
-- `ORR_latent`：latent 正态，后续阈值化为二分类 ORR
+- `PFS_raw`: raw PFS time-to-event (positive)
+- `OS_extra`: additional survival time after PFS (positive)
+- `BIOM_latent`: continuous biomarker
+- `ORR_latent`: latent normal variable, later thresholded into binary ORR
 
-placebo 与 treatment 使用相同的因子 copula 依赖结构（相同 `loadings` 与 `uniq_var`），但边缘分布参数不同，用于表达“治疗效果”。
+Placebo and treatment share the same factor-copula dependence structure (same `loadings` and `uniq_var`), but use different marginal parameters to represent a "treatment effect".
 
 ```{r}
 set.seed(20251230)
@@ -96,20 +96,20 @@ design_trt <- simdesign_factor_copula(
 )
 ```
 
-## 3. 封装成 TrialSimulator 的 `generator(n)`
+## 3. Wrap into TrialSimulator `generator(n)`
 
-TrialSimulator 对 endpoint generator 的协议要点：
+Key points of the TrialSimulator endpoint generator contract:
 
-- 第一个参数名必须是 `n`
-- 返回 `data.frame` 且有 `n` 行
-- 对 TTE：必须提供 `<name>_event` 列
-- 对 non-tte：必须提供 `readout`
+- The first argument name must be `n`
+- Return a `data.frame` with `n` rows
+- For TTE: must provide a `<name>_event` column
+- For non-tte: must provide `readout`
 
-本例构造 4 个终点：
+This example constructs 4 endpoints:
 
-- `PFS`, `OS`：TTE，其中 `OS = PFS + extra` 保证 `OS >= PFS`
-- `ORR`：二分类 non-tte，由 `ORR_latent` 阈值化得到
-- `BIOM`：连续 non-tte
+- `PFS`, `OS`: TTE, with `OS = PFS + extra` ensuring `OS >= PFS`
+- `ORR`: binary non-tte, obtained by thresholding `ORR_latent`
+- `BIOM`: continuous non-tte
 
 ```{r}
 make_factor_endpoint_rng <- function(design, orr_cutoff) {
@@ -140,7 +140,7 @@ head(rng_pbo(n = 3))
 head(rng_trt(n = 3))
 ```
 
-## 4. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行
+## 4. TrialSimulator: Define endpoints/arms/trial/milestones and run
 
 ```{r}
 enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
@@ -196,7 +196,7 @@ controller_obj <- controller(trial_obj, listener_obj)
 controller_obj$run(plot_event = FALSE)
 ```
 
-## 5. 读取锁库数据并做基础校验
+## 5. Read Locked Data and Run Basic Checks
 
 ```{r}
 locked_interim <- trial_obj$get_locked_data("interim")
@@ -220,4 +220,3 @@ with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
 with(locked_final, tapply(is.na(ORR), arm, mean))
 with(locked_final, tapply(is.na(BIOM), arm, mean))
 ```
-

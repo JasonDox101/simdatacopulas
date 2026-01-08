@@ -1,39 +1,39 @@
-.make_empirical_q <- function(x, qtype = 8, eps = 1e-6) { # 构造“经验分位数函数”：把 u∈(0,1) 映射到样本 x 的分位数
-  force(x) # 强制捕获 x，避免闭包里 x 发生惰性求值/被外部同名变量影响
-  function(u) { # 返回一个函数：输入 u（概率），输出对应分位数
-    u <- pmin(pmax(u, eps), 1 - eps) # 将 u 截断到 (eps, 1-eps)，避免 quantile 在 0/1 处产生边界问题
-    as.numeric(stats::quantile(x, probs = u, type = qtype, names = FALSE)) # 计算经验分位数并转为纯数值向量
-  } # 内部函数结束
-} # .make_empirical_q 结束
+.make_empirical_q <- function(x, qtype = 8, eps = 1e-6) { # Build an "empirical quantile function": map u∈(0,1) to sample quantiles of x
+  force(x) # Force-capture x to avoid lazy evaluation / external shadowing inside the closure
+  function(u) { # Return a function: input u (probability) -> output the corresponding quantile
+    u <- pmin(pmax(u, eps), 1 - eps) # Clip u to (eps, 1-eps) to avoid boundary issues at 0/1 in quantile()
+    as.numeric(stats::quantile(x, probs = u, type = qtype, names = FALSE)) # Compute empirical quantiles and return a plain numeric vector
+  } # End inner function
+} # End .make_empirical_q
 
-.assert_is_function_list <- function(x, expected_len, name) { # 断言：x 必须是指定长度的“函数列表”（用于边缘分布 dist）
-  if (!is.list(x) || length(x) != expected_len) { # 检查是否为 list 且长度符合预期
-    stop(name, " must be a list of length ", expected_len, ".", call. = FALSE) # 不满足则抛错，并关闭调用栈提示
+.assert_is_function_list <- function(x, expected_len, name) { # Assert: x must be a function list of expected length (used for marginal quantiles dist)
+  if (!is.list(x) || length(x) != expected_len) { # Check that x is a list and has the expected length
+    stop(name, " must be a list of length ", expected_len, ".", call. = FALSE) # Throw an error (without call stack)
   }
-  ok <- vapply(x, is.function, logical(1)) # 逐个元素检查是否为函数，返回逻辑向量
-  if (!all(ok)) { # 任意一个不是函数就失败
-    stop(name, " must be a list of functions.", call. = FALSE) # 抛错提示必须是函数列表
+  ok <- vapply(x, is.function, logical(1)) # Check each element is a function, returning a logical vector
+  if (!all(ok)) { # Fail if any element is not a function
+    stop(name, " must be a list of functions.", call. = FALSE) # Throw an error if not a function list
   }
-  invisible(TRUE) # 通过校验：返回不可见 TRUE，便于在管道/函数内部使用
-} # .assert_is_function_list 结束
+  invisible(TRUE) # Return an invisible TRUE so it can be used inside pipelines/functions
+} # End .assert_is_function_list
 
-.clip_unit <- function(u, eps = 1e-6) { # 将数值截断到 (eps, 1-eps)，用于 pseudo-observations 或 U(0,1) 模拟值
-  pmin(pmax(u, eps), 1 - eps) # 先下界截断再上界截断（向量化）
-} # .clip_unit 结束
+.clip_unit <- function(u, eps = 1e-6) { # Clip numeric values to (eps, 1-eps), used for pseudo-observations or simulated U(0,1)
+  pmin(pmax(u, eps), 1 - eps) # Vectorized clipping: lower bound then upper bound
+} # End .clip_unit
 
-.get_copula_dim <- function(copula) { # 获取 copula 对象的维度（替代 copula::dim 非导出导致的问题）
-  d <- tryCatch(base::dim(copula), error = function(e) NULL) # 优先尝试 base::dim（若类实现了 dim 方法会返回维度）
-  if (!is.null(d) && length(d) == 1 && is.finite(d)) { # 若成功拿到单个有限数值
-    return(as.integer(d)) # 转为整数并返回
-  }
-
-  d <- tryCatch(methods::slot(copula, "dimension"), error = function(e) NULL) # 再尝试从 S4 slot "dimension" 中读取
-  if (!is.null(d) && length(d) == 1 && is.finite(d)) { # 同样校验其有效性
-    return(as.integer(d)) # 转为整数并返回
+.get_copula_dim <- function(copula) { # Get the copula object's dimension (workaround for copula::dim not being exported)
+  d <- tryCatch(base::dim(copula), error = function(e) NULL) # Try base::dim first (works if the class implements a dim method)
+  if (!is.null(d) && length(d) == 1 && is.finite(d)) { # If a single finite value is returned
+    return(as.integer(d)) # Return as integer
   }
 
-  stop("Unable to determine copula dimension.", call. = FALSE) # 两种方式都失败：终止并提示无法确定维度
-} # .get_copula_dim 结束
+  d <- tryCatch(methods::slot(copula, "dimension"), error = function(e) NULL) # Then try reading S4 slot "dimension"
+  if (!is.null(d) && length(d) == 1 && is.finite(d)) { # Validate it is a single finite value
+    return(as.integer(d)) # Return as integer
+  }
+
+  stop("Unable to determine copula dimension.", call. = FALSE) # Both methods failed
+} # End .get_copula_dim
 
 #' Create a simdata design using an elliptical copula as joint generator
 #'
@@ -50,52 +50,52 @@
 #'
 #' @return A 'simdesign' object usable with simdata::simulate_data().
 #' @export
-simdesign_elliptical_copula <- function( # 使用“椭圆族 copula”构造一个 simdata 设计对象：copula 生成相关的 U(0,1)，再用边缘分位数函数映射到目标尺度
-  copula, # copula 对象（例如 normalCopula / tCopula），决定变量间依赖结构
-  dist, # 边缘分布的分位数函数列表：dist[[j]](u) 把 u∈(0,1) 映射到第 j 个变量
-  names_final = NULL, # 最终输出数据列名（可选）
-  process_final = list(), # simdata 的后处理步骤（可选），在 transform_initial 后执行
-  name = "Elliptical copula design", # 该设计对象的名称
-  eps = 1e-6, # 对 U 做裁剪的数值稳定参数，避免 0/1 进入分位数函数
-  ... # 其余参数透传给 simdata::simdesign（例如元数据等）
-) { # 函数体开始
-  if (!inherits(copula, "copula")) { # 校验 copula 必须继承自类 "copula"
-    stop("copula must inherit from class 'copula'.", call. = FALSE) # 不满足则直接报错
+simdesign_elliptical_copula <- function( # Build a simdata design: copula generates dependent U(0,1), then marginal quantiles map to the target scales
+  copula, # Copula object (e.g., normalCopula / tCopula) defining the dependence structure
+  dist, # List of marginal quantile functions: dist[[j]](u) maps u∈(0,1) to variable j
+  names_final = NULL, # Optional output column names
+  process_final = list(), # Optional simdata post-processing steps, executed after transform_initial
+  name = "Elliptical copula design", # Design name
+  eps = 1e-6, # Numerical-stability clipping for U to avoid 0/1 in quantiles
+  ... # Further arguments passed to simdata::simdesign (e.g., metadata)
+) { # Begin function body
+  if (!inherits(copula, "copula")) { # Validate copula inherits from class "copula"
+    stop("copula must inherit from class 'copula'.", call. = FALSE) # Error if invalid
   }
 
-  dim <- .get_copula_dim(copula) # 从 copula 对象推断维度 d（变量个数）
-  .assert_is_function_list(dist, dim, "dist") # 校验 dist 是长度为 d 的函数列表
+  dim <- .get_copula_dim(copula) # Infer dimension d (number of variables) from the copula object
+  .assert_is_function_list(dist, dim, "dist") # Validate dist is a function list of length d
 
-  generator <- function(n_obs, ...) { # simdata 的 generator：只负责产生“初始态”的随机数（这里是 U 矩阵）
-    u <- copula::rCopula(n_obs, copula) # 从 copula 抽样得到 n_obs×d 的相关 U(0,1)
-    u <- .clip_unit(u, eps = eps) # 将 U 裁剪到 (eps, 1-eps)，避免极端值导致分位数为 ±Inf
-    u # 返回 U（作为 transform_initial 的输入）
-  } # generator 结束
+  generator <- function(n_obs, ...) { # simdata generator: produces the "initial state" random draws (here: a U matrix)
+    u <- copula::rCopula(n_obs, copula) # Sample an n_obs×d dependent U(0,1) matrix from the copula
+    u <- .clip_unit(u, eps = eps) # Clip to (eps, 1-eps) to avoid extreme quantiles (±Inf)
+    u # Return U as input to transform_initial
+  } # End generator
 
-  transform_initial <- function(u) { # simdata 的 transform_initial：把 U 映射到最终变量尺度
-    if (!is.matrix(u) && !is.data.frame(u)) { # 防御式检查：generator 应该返回二维对象
-      stop("Internal error: generator did not return a 2D object.", call. = FALSE) # 若不是二维则报内部错误
+  transform_initial <- function(u) { # simdata transform_initial: map U to the final variable scales
+    if (!is.matrix(u) && !is.data.frame(u)) { # Defensive check: generator should return a 2D object
+      stop("Internal error: generator did not return a 2D object.", call. = FALSE) # Internal error if not 2D
     }
-    u <- as.matrix(u) # 统一转成矩阵，便于按列处理
-    if (ncol(u) != dim) { # 检查列数是否与 copula 维度一致
-      stop("Internal error: U has unexpected number of columns.", call. = FALSE) # 不一致则报内部错误
+    u <- as.matrix(u) # Coerce to matrix for column-wise processing
+    if (ncol(u) != dim) { # Check number of columns matches the copula dimension
+      stop("Internal error: U has unexpected number of columns.", call. = FALSE) # Internal error if mismatch
     }
 
-    x <- lapply(seq_len(dim), function(j) dist[[j]](u[, j])) # 对每一列 U 应用对应边缘分位数函数，得到各变量的样本
-    x <- as.data.frame(x, optional = TRUE, stringsAsFactors = FALSE) # 组装为 data.frame（不强制设定因子）
+    x <- lapply(seq_len(dim), function(j) dist[[j]](u[, j])) # Apply each marginal quantile function to its U column
+    x <- as.data.frame(x, optional = TRUE, stringsAsFactors = FALSE) # Assemble as a data.frame (do not force factors)
 
-    x # 返回映射后的数据框（后续再由 simdata 负责命名与 post-process）
-  } # transform_initial 结束
+    x # Return mapped data (simdata handles naming and post-processing)
+  } # End transform_initial
 
-  simdata::simdesign( # 构建并返回 simdata 设计对象
-    generator = generator, # 初始随机生成器
-    transform_initial = transform_initial, # 初始到最终变量的变换
-    names_final = names_final, # 最终列名
-    process_final = process_final, # 最终后处理流程
-    name = name, # 设计对象名称
-    ... # 其余参数继续透传
-  ) # 返回 simdesign
-} # simdesign_elliptical_copula 结束
+  simdata::simdesign( # Build and return the simdata design object
+    generator = generator, # Initial generator
+    transform_initial = transform_initial, # Mapping from initial state to final variables
+    names_final = names_final, # Final column names
+    process_final = process_final, # Final post-processing pipeline
+    name = name, # Design name
+    ... # Pass through remaining arguments
+  ) # Return simdesign
+} # End simdesign_elliptical_copula
 
 #' Convenience constructor for Gaussian copula simdata designs
 #'
@@ -109,46 +109,46 @@ simdesign_elliptical_copula <- function( # 使用“椭圆族 copula”构造一
 #'
 #' @return A 'simdesign' object.
 #' @export
-simdesign_gaussian_copula <- function( # 便捷构造器：用“高斯 copula（normalCopula）”快速生成 simdata 设计
-  dist, # 边缘分位数函数列表（长度等于维度）
-  rho = 0, # 当 structure = "ex"（交换相关）时使用的单一相关系数
-  Sigma = NULL, # 当 structure = "un"（非结构化相关）时使用的相关矩阵
-  dim = NULL, # 当 structure = "ex" 时需要显式给出维度；structure = "un" 时从 Sigma 推断
-  structure = c("ex", "un"), # 相关结构："ex"=exchangeable（同相关）；"un"=unstructured（任意相关）
-  names_final = NULL, # 最终列名（可选）
-  ... # 透传给 simdesign_elliptical_copula
-) { # 函数体开始
-  structure <- match.arg(structure) # 将 structure 规范化为允许值之一
+simdesign_gaussian_copula <- function( # Convenience constructor: quickly build a simdata design using a Gaussian (normal) copula
+  dist, # List of marginal quantile functions (length equals dimension)
+  rho = 0, # Scalar correlation used when structure = "ex" (exchangeable)
+  Sigma = NULL, # Correlation matrix used when structure = "un" (unstructured)
+  dim = NULL, # Required for "ex"; inferred from Sigma for "un"
+  structure = c("ex", "un"), # Correlation structure: "ex"=exchangeable; "un"=unstructured
+  names_final = NULL, # Optional final column names
+  ... # Passed through to simdesign_elliptical_copula
+) { # Begin function body
+  structure <- match.arg(structure) # Normalize structure
 
-  if (structure == "ex") { # 交换相关结构：只用一个 rho 描述所有非对角相关
-    if (is.null(dim) || !is.numeric(dim) || length(dim) != 1 || dim < 2) { # 检查 dim 合法性
-      stop("For structure='ex', dim must be a single numeric >= 2.", call. = FALSE) # dim 不合法则报错
+  if (structure == "ex") { # Exchangeable correlation: one rho for all off-diagonal correlations
+    if (is.null(dim) || !is.numeric(dim) || length(dim) != 1 || dim < 2) { # Validate dim
+      stop("For structure='ex', dim must be a single numeric >= 2.", call. = FALSE) # Error if invalid
     }
-    cop <- copula::normalCopula(param = rho, dim = as.integer(dim), dispstr = "ex") # 构造 exchangeable 的高斯 copula
-  } else { # 非结构化相关：由完整相关矩阵 Sigma 决定
-    if (is.null(Sigma) || !is.matrix(Sigma) || nrow(Sigma) != ncol(Sigma)) { # 检查 Sigma 是否为方阵
-      stop("For structure='un', Sigma must be a square matrix.", call. = FALSE) # 不是方阵则报错
+    cop <- copula::normalCopula(param = rho, dim = as.integer(dim), dispstr = "ex") # Build exchangeable Gaussian copula
+  } else { # Unstructured correlation: determined by full correlation matrix Sigma
+    if (is.null(Sigma) || !is.matrix(Sigma) || nrow(Sigma) != ncol(Sigma)) { # Validate Sigma is square
+      stop("For structure='un', Sigma must be a square matrix.", call. = FALSE) # Error if not square
     }
-    dim <- ncol(Sigma) # 维度由 Sigma 的列数决定
-    if (dim < 2) { # 维度至少要 2
-      stop("Sigma must have dimension >= 2.", call. = FALSE) # 否则报错
+    dim <- ncol(Sigma) # Dimension is determined by Sigma's size
+    if (dim < 2) { # Dimension must be at least 2
+      stop("Sigma must have dimension >= 2.", call. = FALSE) # Error otherwise
     }
-    if (!all(is.finite(Sigma))) { # 检查相关矩阵是否包含非有限值
-      stop("Sigma must be finite.", call. = FALSE) # 否则报错
+    if (!all(is.finite(Sigma))) { # Check for non-finite values
+      stop("Sigma must be finite.", call. = FALSE) # Error if non-finite
     }
-    if (max(abs(diag(Sigma) - 1)) > 1e-10) { # 检查对角线是否为 1（相关矩阵要求）
-      stop("Sigma must be a correlation matrix with diag = 1.", call. = FALSE) # 不满足则报错
+    if (max(abs(diag(Sigma) - 1)) > 1e-10) { # Check diag is 1 (correlation matrix requirement)
+      stop("Sigma must be a correlation matrix with diag = 1.", call. = FALSE) # Error if violated
     }
-    cop <- copula::normalCopula(param = copula::P2p(Sigma), dim = dim, dispstr = "un") # 将 Sigma 转为参数向量并构造 unstructured 高斯 copula
+    cop <- copula::normalCopula(param = copula::P2p(Sigma), dim = dim, dispstr = "un") # Convert Sigma to parameter vector and build unstructured Gaussian copula
   }
 
-  simdesign_elliptical_copula( # 复用通用椭圆 copula 设计构造函数
-    copula = cop, # 刚构造的高斯 copula
-    dist = dist, # 边缘分布
-    names_final = names_final, # 最终列名
-    ... # 其余参数透传
-  ) # 返回 simdesign
-} # simdesign_gaussian_copula 结束
+  simdesign_elliptical_copula( # Reuse the generic elliptical copula design constructor
+    copula = cop, # Built Gaussian copula
+    dist = dist, # Marginals
+    names_final = names_final, # Final names
+    ... # Pass through remaining arguments
+  ) # Return simdesign
+} # End simdesign_gaussian_copula
 
 #' Fit an elliptical copula design from data (empirical margins)
 #'
@@ -167,88 +167,88 @@ simdesign_gaussian_copula <- function( # 便捷构造器：用“高斯 copula�
 #'
 #' @return A 'simdesign' object usable with simdata::simulate_data().
 #' @export
-simdesign_elliptical_copula_from_data <- function( # 从已有数据拟合椭圆 copula（依赖结构）并用经验边缘（分位数函数）构造 simdata 设计
-  data, # 原始数据（data.frame）
-  vars, # 需要建模的变量名向量（长度 >= 2）
-  family = c("gaussian", "t"), # copula 家族：高斯或 t；t 族需要提供 df
-  structure = c("ex", "un"), # 相关结构：交换相关 or 非结构化
-  fit_method = c("itau", "itau_mpl"), # 拟合方法：仅 itau（稳健）或 itau 初始化后尝试 mpl
-  df = NULL, # t copula 的自由度（family="t" 时必填且 > 2）
-  qtype = 8, # 经验分位数的 type（stats::quantile 的算法选择）
-  eps = 1e-6, # 数值稳定裁剪：用于 pobs 与后续模拟的 U
-  name = "Elliptical copula design (fit from data)", # 设计对象名称
-  ... # 其余参数作为元数据保存在 simdesign 中
-) { # 函数体开始
-  family <- match.arg(family) # 规范化 family
-  structure <- match.arg(structure) # 规范化 structure
-  fit_method <- match.arg(fit_method) # 规范化 fit_method
+simdesign_elliptical_copula_from_data <- function( # Fit an elliptical copula from data and build a simdata design with empirical margins (quantile functions)
+  data, # Input data (data.frame)
+  vars, # Variable names to model (length >= 2)
+  family = c("gaussian", "t"), # Copula family: Gaussian or t; t requires df
+  structure = c("ex", "un"), # Correlation structure: exchangeable or unstructured
+  fit_method = c("itau", "itau_mpl"), # Fit method: itau only (robust) or itau then try mpl
+  df = NULL, # Degrees of freedom for t copula (required for family="t", must be > 2)
+  qtype = 8, # Quantile type for empirical margins (stats::quantile algorithm)
+  eps = 1e-6, # Numerical stability clipping for pobs and simulated U
+  name = "Elliptical copula design (fit from data)", # Design name
+  ... # Additional fields stored as metadata in the simdesign
+) { # Begin function body
+  family <- match.arg(family) # Normalize family
+  structure <- match.arg(structure) # Normalize structure
+  fit_method <- match.arg(fit_method) # Normalize fit_method
 
-  if (!is.data.frame(data)) { # 检查输入 data 类型
-    stop("data must be a data.frame.", call. = FALSE) # 不是 data.frame 则报错
+  if (!is.data.frame(data)) { # Validate input data type
+    stop("data must be a data.frame.", call. = FALSE) # Error if not a data.frame
   }
-  if (!is.character(vars) || length(vars) < 2) { # 检查 vars 合法性
-    stop("vars must be a character vector of length >= 2.", call. = FALSE) # vars 必须是长度>=2的字符向量
+  if (!is.character(vars) || length(vars) < 2) { # Validate vars
+    stop("vars must be a character vector of length >= 2.", call. = FALSE) # vars must be a character vector of length >= 2
   }
-  if (!all(vars %in% names(data))) { # 检查 vars 是否都在 data 中
-    miss <- setdiff(vars, names(data)) # 找出缺失的列名
-    stop("vars missing from data: ", paste(miss, collapse = ", "), call. = FALSE) # 报错提示缺失列
+  if (!all(vars %in% names(data))) { # Check vars exist in data
+    miss <- setdiff(vars, names(data)) # Identify missing columns
+    stop("vars missing from data: ", paste(miss, collapse = ", "), call. = FALSE) # Error with missing columns
   }
 
-  df_in <- data[, vars, drop = FALSE] # 只取出待建模变量子集（保持 data.frame）
-  for (nm in vars) { # 逐个变量做最小可行（MVP）检查
-    if (!is.numeric(df_in[[nm]])) { # 当前实现仅支持数值型变量（便于 pobs 与相关计算）
-      stop("All vars must be numeric for MVP. Non-numeric: ", nm, call. = FALSE) # 非数值则报错并指出变量名
+  df_in <- data[, vars, drop = FALSE] # Subset to modeled variables (keep as data.frame)
+  for (nm in vars) { # Minimal viable checks for each variable
+    if (!is.numeric(df_in[[nm]])) { # Current MVP supports numeric variables only (for pobs and correlation)
+      stop("All vars must be numeric for MVP. Non-numeric: ", nm, call. = FALSE) # Error with variable name
     }
   }
-  xmat <- as.matrix(df_in) # 转成数值矩阵便于后续计算
-  if (!all(is.finite(xmat))) { # 检查是否包含 NA/NaN/Inf
-    stop("Data contains non-finite values in selected vars.", call. = FALSE) # 存在非有限值则报错
+  xmat <- as.matrix(df_in) # Convert to numeric matrix for downstream calculations
+  if (!all(is.finite(xmat))) { # Check for NA/NaN/Inf
+    stop("Data contains non-finite values in selected vars.", call. = FALSE) # Error if non-finite values exist
   }
 
-  dist <- lapply(df_in, .make_empirical_q, qtype = qtype, eps = eps) # 为每个变量构造经验边缘分位数函数（用于模拟时还原到原尺度）
+  dist <- lapply(df_in, .make_empirical_q, qtype = qtype, eps = eps) # Build empirical marginal quantile functions (map simulated U back to original scale)
 
-  u_hat <- copula::pobs(xmat) # 将样本转换为伪观测（pseudo-observations），近似得到每列的 U(0,1)
-  u_hat <- .clip_unit(u_hat, eps = eps) # 裁剪到 (eps,1-eps)，避免边界 0/1 影响拟合与后续分位数
+  u_hat <- copula::pobs(xmat) # Convert samples to pseudo-observations, approximating U(0,1) per column
+  u_hat <- .clip_unit(u_hat, eps = eps) # Clip to (eps, 1-eps) to avoid 0/1 boundaries affecting fit and quantiles
 
-  dim <- ncol(u_hat) # copula 维度 d（变量个数）
+  dim <- ncol(u_hat) # Copula dimension d (number of variables)
 
-  if (family == "gaussian") { # 拟合高斯 copula
-    if (structure == "ex") { # 交换相关：只需要一个参数
-      cop0 <- copula::normalCopula(param = 0, dim = dim, dispstr = "ex") # 初始值设为 0 相关
-    } else { # 非结构化相关：需要 d(d-1)/2 个参数
-      cop0 <- copula::normalCopula(param = rep(0, dim * (dim - 1) / 2), dim = dim, dispstr = "un") # 初始相关全为 0
+  if (family == "gaussian") { # Fit a Gaussian copula
+    if (structure == "ex") { # Exchangeable: single parameter
+      cop0 <- copula::normalCopula(param = 0, dim = dim, dispstr = "ex") # Initialize at zero correlation
+    } else { # Unstructured: d(d-1)/2 parameters
+      cop0 <- copula::normalCopula(param = rep(0, dim * (dim - 1) / 2), dim = dim, dispstr = "un") # Initialize all correlations at zero
     }
-  } else { # 拟合 t copula（尾部相关更强）
-    if (is.null(df) || !is.numeric(df) || length(df) != 1 || df <= 2) { # t copula 的 df 约束
-      stop("For family='t', df must be a single numeric > 2.", call. = FALSE) # df 不合法则报错
+  } else { # Fit a t copula (stronger tail dependence)
+    if (is.null(df) || !is.numeric(df) || length(df) != 1 || df <= 2) { # df constraints for t copula
+      stop("For family='t', df must be a single numeric > 2.", call. = FALSE) # Error if invalid
     }
-    if (structure == "ex") { # 交换相关的 t copula
-      cop0 <- copula::tCopula(param = 0, dim = dim, dispstr = "ex", df = df, df.fixed = TRUE) # df.fixed=TRUE 表示 df 不参与估计
-    } else { # 非结构化相关的 t copula
-      cop0 <- copula::tCopula(param = rep(0, dim * (dim - 1) / 2), dim = dim, dispstr = "un", df = df, df.fixed = TRUE) # 相关参数初值为 0
+    if (structure == "ex") { # Exchangeable t copula
+      cop0 <- copula::tCopula(param = 0, dim = dim, dispstr = "ex", df = df, df.fixed = TRUE) # df.fixed=TRUE means df is not estimated
+    } else { # Unstructured t copula
+      cop0 <- copula::tCopula(param = rep(0, dim * (dim - 1) / 2), dim = dim, dispstr = "un", df = df, df.fixed = TRUE) # Initialize correlation parameters at zero
     }
   }
 
-  fit_itau <- copula::fitCopula(cop0, data = u_hat, method = "itau") # 先用 Kendall's tau 的反演（ITAU）做稳健拟合/初始化
-  fit_final <- fit_itau # 默认把 itau 结果作为最终结果
+  fit_itau <- copula::fitCopula(cop0, data = u_hat, method = "itau") # Robust fit/initialization via inversion of Kendall's tau (ITAU)
+  fit_final <- fit_itau # Use itau as the default final fit
 
-  if (fit_method == "itau_mpl") { # 若选择 itau 后再尝试 MPL（最大伪似然）
-    fit_final <- tryCatch( # MPL 在某些数据/初值下可能失败；失败则回退到 itau
-      copula::fitCopula(fit_itau@copula, data = u_hat, method = "mpl"), # 用 itau 拟合得到的 copula 作为 MPL 的起点
-      error = function(e) fit_itau # 若 MPL 抛错，则返回 itau 拟合结果
+  if (fit_method == "itau_mpl") { # If selected, try MPL (maximum pseudo-likelihood) after itau
+    fit_final <- tryCatch( # MPL can fail for some data/starts; fall back to itau on error
+      copula::fitCopula(fit_itau@copula, data = u_hat, method = "mpl"), # Use itau-fitted copula as MPL starting point
+      error = function(e) fit_itau # Fall back to itau fit if MPL errors
     )
   }
 
-  simdesign_elliptical_copula( # 用拟合出的依赖结构 + 经验边缘，构造可直接 simulate_data 的 simdesign
-    copula = fit_final@copula, # 拟合后的 copula 对象（包含相关参数/结构等）
-    dist = dist, # 经验边缘分位数函数列表（保持原数据的边缘分布形状）
-    names_final = vars, # 输出列名与建模变量名一致
-    name = name, # 设计名称
-    eps = eps, # U 裁剪参数（模拟时也会使用）
-    copula_fit = fit_final, # 附带保存拟合对象，便于用户检查参数/收敛信息
-    copula_family = family, # 元数据：copula 家族
-    copula_structure = structure, # 元数据：相关结构
-    margins = "empirical", # 元数据：边缘采用经验分布
-    ... # 继续透传用户的其他元数据字段
-  ) # 返回 simdesign
-} # simdesign_elliptical_copula_from_data 结束
+  simdesign_elliptical_copula( # Build a simdesign from fitted dependence + empirical margins for direct simulate_data()
+    copula = fit_final@copula, # Fitted copula object (parameters/structure)
+    dist = dist, # Empirical marginal quantile functions (preserve original marginal shapes)
+    names_final = vars, # Output names match modeled variables
+    name = name, # Design name
+    eps = eps, # U clipping (also used during simulation)
+    copula_fit = fit_final, # Store fit object for inspection (parameters/convergence)
+    copula_family = family, # Metadata: copula family
+    copula_structure = structure, # Metadata: correlation structure
+    margins = "empirical", # Metadata: empirical margins
+    ... # Pass through additional metadata fields
+  ) # Return simdesign
+} # End simdesign_elliptical_copula_from_data

@@ -1,24 +1,24 @@
 # simdatacopulas
 
-`simdatacopulas` 是对 `simdata` 的扩展：把不同类型的 copula（依赖结构）封装为 `simdata::simdesign()` 模板对象，从而可以用统一的方式生成“边缘分布任意 + 相关结构可控”的多变量数据。
+`simdatacopulas` is an extension of `simdata`. It wraps different copula types (dependence structures) into `simdata::simdesign()` templates, so you can generate multivariate data in a unified way with "arbitrary marginals + controllable dependence".
 
-本包的核心思想是两步：
+The core idea of this package is a two-step workflow:
 
-1. 用某个 copula 生成相关的 \(U\in(0,1)^d\)（联合依赖结构）
-2. 对每一列 \(U_j\) 施加边缘分位数函数 `dist[[j]](u)`，把 \(U\) 映射到你真正想要的变量尺度（边缘分布）
+1. Use a copula to generate dependent \(U\in(0,1)^d\) (joint dependence structure)
+2. Apply a marginal quantile function `dist[[j]](u)` to each column \(U_j\), mapping \(U\) to the target variable scales (marginal distributions)
 
-因此 copula 负责“相关/尾部依赖/高维结构”，边缘分位数函数负责“单变量分布形状（连续/离散/截断等）”。
-
----
-
-## 安装与依赖
-
-- 运行依赖：`simdata`、`copula`
-- 可选依赖：`VineCopula`（仅 vine copula 系列需要）
+In short, the copula controls correlation/tail dependence/high-dimensional structure, while the marginal quantile functions control each univariate distribution shape (continuous/discrete/truncated, etc.).
 
 ---
 
-## 快速上手（通用工作流）
+## Installation and dependencies
+
+- Runtime dependencies: `simdata`, `copula`
+- Optional dependency: `VineCopula` (only required for the vine-copula module)
+
+---
+
+## Quick start (generic workflow)
 
 ```r
 library(simdata)
@@ -43,41 +43,41 @@ head(x)
 
 ---
 
-## 模型总览（每类 copula 的“具体作用”）
+## Model overview (what each copula family is for)
 
-本包目前提供 6 组联合生成模块：
+This package currently provides six joint-generation modules:
 
-- 椭圆族 copula：`simdesign_elliptical_copula()` / `simdesign_gaussian_copula()` / `simdesign_elliptical_copula_from_data()`
-- 阿基米德 copula：`simdesign_archimedean_copula()` 及 Clayton/Gumbel/Frank/Joe 的便捷构造器与 `*_from_data()`
-- Vine copula（pair-copula construction）：`simdesign_vine_copula()` / `simdesign_vine_copula_from_data()`
-- 经验 copula（重采样联合秩结构）：`simdesign_empirical_copula()` / `simdesign_empirical_copula_from_data()`
-- 因子 copula（低秩依赖，适合高维）：`simdesign_factor_copula()` / `simdesign_factor_copula_from_data()`
-- 潜变量阈值高斯模型（离散/等级终点联合生成）：`simdesign_latent_threshold_gaussian()` / `simdesign_latent_threshold_gaussian_from_data()`
+- Elliptical copulas: `simdesign_elliptical_copula()` / `simdesign_gaussian_copula()` / `simdesign_elliptical_copula_from_data()`
+- Archimedean copulas: `simdesign_archimedean_copula()` plus convenience constructors for Clayton/Gumbel/Frank/Joe and `*_from_data()`
+- Vine copulas (pair-copula construction): `simdesign_vine_copula()` / `simdesign_vine_copula_from_data()`
+- Empirical copulas (resample the joint rank structure): `simdesign_empirical_copula()` / `simdesign_empirical_copula_from_data()`
+- Factor copulas (low-rank dependence, suitable for high dimensions): `simdesign_factor_copula()` / `simdesign_factor_copula_from_data()`
+- Latent threshold Gaussian model (joint generation for discrete/ordinal endpoints): `simdesign_latent_threshold_gaussian()` / `simdesign_latent_threshold_gaussian_from_data()`
 
-下面逐一说明每个模型的作用、适用场景与用法示例。
+Below we describe each model's purpose, when to use it, and example usage.
 
 ---
 
-## 1) 椭圆族 copula（Gaussian / t）
+## 1) Elliptical copulas (Gaussian / t)
 
-### 作用
+### Purpose
 
-- 用“相关矩阵（或交换相关系数）”定义依赖结构，适合模拟**线性相关/对称依赖**的多变量终点。
-- `Gaussian copula` 适用于“相关结构主要由相关系数刻画”的场景。
-- `t copula` 在高斯基础上增加自由度（`df`），能表达更强的**尾部相关**（极端事件同步出现的概率更大）。
+- Use a correlation matrix (or an exchangeable correlation coefficient) to define the dependence structure; suitable for simulating multivariate endpoints with **linear correlation / symmetric dependence**.
+- A `Gaussian copula` is appropriate when dependence is largely captured by correlations.
+- A `t copula` adds degrees of freedom (`df`) on top of the Gaussian case and can represent stronger **tail dependence** (extreme events co-occur more often).
 
-### 何时用
+### When to use
 
-- 你有目标相关矩阵（或想要交换相关结构），希望把多终点（如 PFS、OS、ORR 连续评分等）关联起来。
-- 维度中等、结构不复杂，或希望先用一个稳健的“基线依赖结构”。
+- You have a target correlation matrix (or want an exchangeable structure) and want to couple multiple endpoints (e.g., continuous PFS/OS scores, biomarker measures, etc.).
+- Dimension is moderate and you want a robust baseline dependence structure.
 
-### 关键接口
+### Key interfaces
 
-- `simdesign_elliptical_copula(copula, dist, ...)`：传入 `copula::normalCopula()` 或 `copula::tCopula()` 等对象
-- `simdesign_gaussian_copula(dist, structure = "ex"/"un", ...)`：高斯 copula 便捷入口
-- `simdesign_elliptical_copula_from_data(data, vars, family = "gaussian"/"t", ...)`：从数据拟合依赖结构，边缘默认用经验分位数
+- `simdesign_elliptical_copula(copula, dist, ...)`: pass a `copula::normalCopula()` or `copula::tCopula()` object, etc.
+- `simdesign_gaussian_copula(dist, structure = "ex"/"un", ...)`: convenience entry point for the Gaussian copula
+- `simdesign_elliptical_copula_from_data(data, vars, family = "gaussian"/"t", ...)`: fit dependence from data; marginals default to empirical quantiles
 
-### 示例：从数据拟合 Gaussian copula
+### Example: fit a Gaussian copula from data
 
 ```r
 library(simdata)
@@ -103,29 +103,29 @@ head(sim)
 
 ---
 
-## 2) 阿基米德 copula（Clayton / Gumbel / Frank / Joe）
+## 2) Archimedean copulas (Clayton / Gumbel / Frank / Joe)
 
-### 作用
+### Purpose
 
-阿基米德 copula 通过一个参数（通常记为 `theta`）刻画依赖强度，常用于模拟**非对称尾部依赖**：
+Archimedean copulas parameterize dependence strength using a single parameter (often denoted `theta`) and are commonly used to model **asymmetric tail dependence**:
 
-- Clayton：**下尾依赖**更强（低值/差结局更容易一起出现）
-- Gumbel：**上尾依赖**更强（高值/好结局或极端高值更容易一起出现）
-- Frank：对称依赖、通常**无尾依赖**（中间区域依赖更明显）
-- Joe：上尾依赖（常比 Gumbel 更“尖锐”）
+- Clayton: stronger **lower-tail dependence** (low values / worse outcomes co-occur more often)
+- Gumbel: stronger **upper-tail dependence** (high values / better outcomes or extreme highs co-occur more often)
+- Frank: symmetric dependence, typically **no tail dependence** (dependence is more pronounced in the middle)
+- Joe: upper-tail dependence (often "sharper" than Gumbel)
 
-### 何时用
+### When to use
 
-- 你关心“极端事件/尾部事件的联动”，例如严重不良事件与疗效极端反应的同步性。
-- 你希望用少量参数表达依赖（模型更轻、更好控），但仍保留尾部行为差异。
+- You care about co-movement in extreme/tail events, e.g., synchrony between severe AEs and extreme efficacy responses.
+- You want a lightweight dependence model with few parameters while retaining different tail behaviors.
 
-### 关键接口
+### Key interfaces
 
 - `simdesign_archimedean_copula(copula, dist, ...)`
-- 便捷构造器：`simdesign_clayton_copula()`、`simdesign_gumbel_copula()`、`simdesign_frank_copula()`、`simdesign_joe_copula()`
-- `simdesign_archimedean_copula_from_data(data, vars, family = ..., ...)`：从数据拟合 `theta`（并用经验边缘）
+- Convenience constructors: `simdesign_clayton_copula()`, `simdesign_gumbel_copula()`, `simdesign_frank_copula()`, `simdesign_joe_copula()`
+- `simdesign_archimedean_copula_from_data(data, vars, family = ..., ...)`: fit `theta` from data (with empirical margins)
 
-### 示例：用 Gumbel copula 模拟“上尾依赖”
+### Example: simulate "upper-tail dependence" with a Gumbel copula
 
 ```r
 library(simdata)
@@ -151,28 +151,28 @@ head(x)
 
 ## 3) Vine copula（C-vine / D-vine / R-vine）
 
-### 作用
+### Purpose
 
-Vine copula 用“成对 copula 的树结构（pair-copula construction）”来拼接高维依赖结构：
+Vine copulas build high-dimensional dependence by stitching together a tree of pair-copulas (pair-copula construction):
 
-- 在高维下比“一个整体 copula”更灵活：不同变量对可以选择不同家族、不同尾部行为
-- 能表达复杂的条件依赖关系：例如 \(X_1\) 与 \(X_3\) 的相关依赖可能主要通过 \(X_2\) 传递
+- More flexible than a single "global" copula in high dimensions: different variable pairs can use different families and tail behaviors
+- Can express complex conditional dependence: e.g., dependence between \(X_1\) and \(X_3\) may be largely mediated through \(X_2\)
 
-### 何时用
+### When to use
 
-- 维度较高（例如 6+ 个终点/协变量）且你不希望依赖结构被一个单一相关矩阵/单参数限制。
-- 你希望数据驱动地选择 pair-copula 家族（AIC/BIC 等准则）。
+- Dimension is high (e.g., 6+ endpoints/covariates) and you do not want to be constrained by a single correlation matrix / single parameter.
+- You want data-driven selection of pair-copula families (AIC/BIC, etc.).
 
-### 依赖说明
+### Dependency note
 
-Vine 模块依赖 `VineCopula` 包；未安装时会报错提示安装。
+The vine module depends on the `VineCopula` package; if it is not installed, an error will prompt you to install it.
 
-### 关键接口
+### Key interfaces
 
-- `simdesign_vine_copula(vine, dist, ...)`：传入 `VineCopula` 的 vine 对象（如 `RVineMatrix`）
-- `simdesign_vine_copula_from_data(data, vars, vine_type = "rvine"/"cvine"/"dvine", ...)`：从数据拟合 vine 结构与 pair-copula
+- `simdesign_vine_copula(vine, dist, ...)`: pass a `VineCopula` vine object (e.g., `RVineMatrix`)
+- `simdesign_vine_copula_from_data(data, vars, vine_type = "rvine"/"cvine"/"dvine", ...)`: fit a vine structure and pair-copulas from data
 
-### 示例：从数据拟合 R-vine（自动结构选择）
+### Example: fit an R-vine from data (automatic structure selection)
 
 ```r
 library(simdata)
@@ -200,33 +200,33 @@ head(sim)
 
 ---
 
-## 4) 经验 copula（Empirical copula / rank resampling）
+## 4) Empirical copula (rank resampling)
 
-### 作用
+### Purpose
 
-经验 copula 不显式假设某个参数化 copula 家族，而是：
+An empirical copula does not assume a parametric copula family explicitly. Instead, it:
 
-- 从已有样本的 `U`（伪观测）中**重采样**联合秩结构
-- 结合你指定的边缘分位数函数，生成新样本
+- **Resamples** the joint rank structure from existing `U` (pseudo-observations)
+- Combines it with your chosen marginal quantile functions to generate new samples
 
-它的核心价值是：在样本量足够、你相信样本联合秩结构具有代表性时，可以非常直接地“复刻”依赖结构。
+Its core value is that, when sample size is sufficient and you believe the observed joint rank structure is representative, you can very directly "replicate" the dependence structure.
 
-### 何时用
+### When to use
 
-- 你有可靠的历史/真实数据，想尽量保留其中的联合依赖结构（尤其是复杂、难以参数化的依赖）。
-- 你想避免 copula 家族选择带来的建模偏差。
+- You have reliable historical/real data and want to preserve its joint dependence structure (especially complex dependence that is hard to parameterize).
+- You want to avoid modeling bias introduced by choosing a copula family.
 
-### 注意点
+### Notes
 
-- 经验 copula 的外推能力有限：它擅长“重现已观察到的依赖”，不擅长“推断未观察到的尾部结构”。
-- 可选 `jitter` 用于缓解大量 ties 或离散化带来的重复点问题。
+- Extrapolation is limited: it is good at reproducing observed dependence, but not at inferring unobserved tail structure.
+- Optional `jitter` can help mitigate repeated points due to many ties or discretization.
 
-### 关键接口
+### Key interfaces
 
 - `simdesign_empirical_copula(u_data, dist, replace = TRUE, jitter = 0, ...)`
-- `simdesign_empirical_copula_from_data(data, vars, ...)`：自动对数据做 `pobs()` 得到 `u_data`
+- `simdesign_empirical_copula_from_data(data, vars, ...)`: automatically compute `u_data` via `pobs()`
 
-### 示例：直接从数据生成经验 copula 设计
+### Example: build an empirical-copula design directly from data
 
 ```r
 library(simdata)
@@ -251,32 +251,32 @@ head(sim)
 
 ---
 
-## 5) 因子 copula（Factor Gaussian copula）
+## 5) Factor copula (Factor Gaussian copula)
 
-### 作用
+### Purpose
 
-因子 copula 用“少数公共因子 + 特异噪声”的结构生成高维相关：
+Factor copulas generate high-dimensional dependence using a structure of "a few common factors + idiosyncratic noise":
 
 \[
 Z = F \Lambda^\top + E,\quad U = \Phi(\tilde Z)
 \]
 
-- \(\Lambda\)（`loadings`）控制每个变量对公共因子的敏感度
-- `uniq_var` 控制每个变量的特异方差
+- \(\Lambda\) (`loadings`) controls each variable's sensitivity to the common factors
+- `uniq_var` controls each variable's idiosyncratic variance
 
-它相当于把协方差/相关结构限制为“低秩 + 对角”，从而在高维下更稳定、参数更少。
+This effectively constrains the covariance/correlation structure to "low-rank + diagonal", making it more stable and parsimonious in high dimensions.
 
-### 何时用
+### When to use
 
-- 维度较高（例如多终点 + 多协变量），你希望用少量参数刻画“整体相关驱动因素”（例如疾病严重程度、暴露量、治疗敏感性等潜因子）。
-- 你需要一个比完整相关矩阵更稳定、更可解释的相关结构。
+- Dimension is high (e.g., multiple endpoints + covariates) and you want a small-parameter representation of shared drivers of correlation (e.g., disease severity, exposure, treatment sensitivity).
+- You need a correlation structure that is more stable and interpretable than a full correlation matrix.
 
-### 关键接口
+### Key interfaces
 
-- `simdesign_factor_copula(loadings, uniq_var, dist, ...)`：直接给定因子结构与边缘
-- `simdesign_factor_copula_from_data(data, vars, n_factors = 1, ...)`：先把数据转换为伪观测并映射到高斯空间，再做因子拟合
+- `simdesign_factor_copula(loadings, uniq_var, dist, ...)`: provide the factor structure and marginals directly
+- `simdesign_factor_copula_from_data(data, vars, n_factors = 1, ...)`: convert data to pseudo-observations and map to Gaussian space, then fit a factor model
 
-### 示例：从数据拟合 1 因子 copula
+### Example: fit a 1-factor copula from data
 
 ```r
 library(simdata)
@@ -301,31 +301,31 @@ head(sim)
 
 ---
 
-## 6) 潜变量阈值高斯模型（Latent threshold Gaussian）
+## 6) Latent threshold Gaussian model
 
-### 作用
+### Purpose
 
-该模块用于联合生成**离散/等级终点**（如 AE 分级、ORR 二分类、毒性等级等）：
+This module jointly generates **discrete/ordinal endpoints** (e.g., AE grades, binary ORR, toxicity grades):
 
-- 先用因子结构生成连续潜变量 \(Z\)
-- 每个离散变量通过阈值向量 `thresholds[[j]]` 把 \(Z_j\) 切分为 1/2/… 多个等级
-- 可选 `levels` 为每列指定输出的有序因子标签
+- First generate continuous latent variables \(Z\) using a factor structure
+- Each discrete variable is formed by thresholding \(Z_j\) using a threshold vector `thresholds[[j]]` into levels 1/2/… etc.
+- Optionally provide `levels` to set ordered factor labels for each column
 
-这类模型的价值是：你能用高斯因子结构（或多元高斯）表达“离散终点之间的相关”，同时保持各离散变量的边缘分布（由阈值决定）。
+The value of this model is that it expresses correlation among discrete endpoints via a Gaussian factor (or multivariate Gaussian) structure while preserving each discrete variable's marginal distribution (determined by the thresholds).
 
-### 何时用
+### When to use
 
-- 终点包含等级/二分类变量，且你希望它们与其他终点共享潜在相关来源（公共因子）。
-- 你希望显式控制各等级比例（阈值）与等级间相关结构。
+- Endpoints include ordinal/binary variables, and you want them to share latent correlation sources (common factors) with other endpoints.
+- You want explicit control of category proportions (thresholds) and the correlation structure across levels.
 
-### 关键接口
+### Key interfaces
 
 - `simdesign_latent_threshold_gaussian(loadings, uniq_var, thresholds, levels = NULL, ...)`
-- `simdesign_latent_threshold_gaussian_from_data(data, vars, n_factors = 1, ...)`：
-  - 自动从每列数据估计阈值（按类别累计概率映射到 `qnorm` 切点）
-  - 将数据转为伪观测并映射到高斯空间后拟合因子结构
+- `simdesign_latent_threshold_gaussian_from_data(data, vars, n_factors = 1, ...)`:
+  - Automatically estimate thresholds from each column (map cumulative category probabilities to `qnorm` cut points)
+  - Convert data to pseudo-observations, map to Gaussian space, then fit a factor structure
 
-### 示例：手工指定阈值生成二分类 + 三分类联合分布
+### Example: manually specify thresholds to generate a binary + three-level joint distribution
 
 ```r
 library(simdata)
@@ -353,13 +353,12 @@ head(sim)
 
 ---
 
-## 与 TrialSimulator 的连接方式（建议）
+## Integration with TrialSimulator (recommended)
 
-`TrialSimulator` 对数据生成器的要求是“一个 `generator(n)` 返回终点列的数据框”。本包返回的是 `simdata` 的 `simdesign` 对象，因此你通常会这样桥接：
+`TrialSimulator` expects a data generator of the form "a `generator(n)` that returns a data.frame of endpoint columns". This package returns `simdata` `simdesign` objects, so a typical bridge looks like:
 
-1. 用 `simdatacopulas::*` 构造 `design`
-2. 用 `simdata::simulate_data(design, n_obs = n, seed = ...)` 生成一批“联合相关”的基础变量
-3. 在 `TrialSimulator` 的 endpoint generator 内，把这些基础变量映射成 TrialSimulator 需要的终点格式（例如 `*_event`、删失规则等）
+1. Build a `design` using `simdatacopulas::*`
+2. Generate a batch of jointly dependent base variables using `simdata::simulate_data(design, n_obs = n, seed = ...)`
+3. Inside TrialSimulator's endpoint generator, map those base variables into the endpoint format TrialSimulator needs (e.g., `*_event`, censoring rules, etc.)
 
-这样做的好处是：联合依赖结构与边缘分布建模与试验流程（入组/删失/分析）解耦，便于复用与迭代。
-
+The benefit is that dependence/marginal modeling is decoupled from the trial process (enrollment/censoring/analysis), making it easier to reuse and iterate.

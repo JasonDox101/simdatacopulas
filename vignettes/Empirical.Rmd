@@ -1,5 +1,5 @@
 ---
-title: "Empirical Copula → TrialSimulator：端到端示例（Rank Resampling）"
+title: "Empirical Copula → TrialSimulator: End-to-End Example (Rank Resampling)"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Empirical Copula to TrialSimulator (Rank Resampling)}
@@ -26,18 +26,18 @@ cat(
 )
 ```
 
-本 vignette 展示如何把 `simdatacopulas` 的经验 copula（empirical copula / rank resampling）联合生成器封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+This vignette demonstrates how to wrap the `simdatacopulas` empirical copula (empirical copula / rank resampling) joint generator into the `generator(n)` interface required by `TrialSimulator`, and how to:
 
-1. 用“先导/历史数据”的联合秩结构（`u_data`）复刻依赖结构
-2. 用你指定的边缘分位数函数（`dist`）控制边缘分布
-3. 接入 TrialSimulator 并运行完整试验仿真流程
+1. Reproduce dependence using the joint rank structure (`u_data`) from pilot/historical data
+2. Control marginal distributions using your chosen marginal quantile functions (`dist`)
+3. Plug into TrialSimulator and run a full trial simulation workflow
 
-经验 copula 的关键特征：
+Key characteristics of the empirical copula:
 
-- 强项：可以非常直接地复刻历史数据中的联合秩结构（无需选择参数化 copula 家族）
-- 限制：外推能力弱，尤其是“未观察到的尾部极端结构”难以凭空增强
+- Strength: directly reproduces the joint rank structure observed in historical data (no need to choose a parametric copula family)
+- Limitation: weak extrapolation, especially for "unobserved extreme tail structure", which is hard to create out of thin air
 
-## 1. 加载依赖
+## 1. Load Dependencies
 
 ```{r}
 library(simdata)
@@ -46,11 +46,11 @@ library(TrialSimulator)
 library(copula)
 ```
 
-## 2. 准备先导数据（pilot）并提取 `u_data`
+## 2. Prepare Pilot Data and Extract `u_data`
 
-经验 copula 的输入通常是一个 `u_data`：它是历史样本做 `pobs()` 得到的伪观测（pseudo-observations），本质上保留了联合秩结构。
+The input to an empirical copula is typically `u_data`: pseudo-observations obtained by applying `pobs()` to historical samples, which essentially preserve the joint rank structure.
 
-本例为了可复现，先构造一份 pilot 数据；在你的真实项目中，你应该把 `pilot` 替换成真实历史数据。
+For reproducibility, we construct pilot data in this example; in your real project, you should replace `pilot` with real historical data.
 
 ```{r}
 set.seed(20251230)
@@ -80,14 +80,14 @@ u_data <- copula::pobs(as.matrix(pilot))
 u_data <- pmin(pmax(u_data, 1e-6), 1 - 1e-6)
 ```
 
-## 3. 定义你要用于仿真的边缘分布（dist）
+## 3. Define Marginals (dist) for Simulation
 
-经验 copula 的典型用法是：
+Typical usage of the empirical copula:
 
-- 依赖结构：来自历史数据的 `u_data`
-- 边缘分布：来自你指定的 `dist`（可以与历史数据不同）
+- Dependence: from historical `u_data`
+- Marginals: from your specified `dist` (can differ from historical marginals)
 
-这里我们构造 placebo 与 treatment 两组边缘参数差异来表达治疗效果。
+Here we encode a treatment effect by using different marginal parameters for placebo vs treatment.
 
 ```{r}
 dist_pbo <- list(
@@ -105,9 +105,9 @@ dist_trt <- list(
 )
 ```
 
-## 4. 构造经验 copula 的 `simdesign`
+## 4. Build the Empirical-Copula `simdesign`
 
-`simdesign_empirical_copula()` 会从 `u_data` 中重采样联合秩结构（rank resampling），然后再用 `dist` 将每列映射到目标尺度。
+`simdesign_empirical_copula()` resamples the joint rank structure from `u_data` (rank resampling), then maps each column to the target scale using `dist`.
 
 ```{r}
 design_pbo <- simdesign_empirical_copula(
@@ -127,20 +127,20 @@ design_trt <- simdesign_empirical_copula(
 )
 ```
 
-## 5. 封装成 TrialSimulator 的 `generator(n)`
+## 5. Wrap into TrialSimulator `generator(n)`
 
-TrialSimulator 对 endpoint generator 的协议要点：
+Key points of the TrialSimulator endpoint generator contract:
 
-- 第一个参数名必须是 `n`
-- 返回 `data.frame` 且有 `n` 行
-- 对 TTE：必须提供 `<name>_event` 列
-- 对 non-tte：必须提供 `readout`
+- The first argument name must be `n`
+- Return a `data.frame` with `n` rows
+- For TTE: must provide a `<name>_event` column
+- For non-tte: must provide `readout`
 
-本例构造 4 个终点：
+This example constructs 4 endpoints:
 
-- `PFS`, `OS`：TTE，其中 `OS = PFS + extra` 保证 `OS >= PFS`
-- `ORR`：二分类 non-tte，由 `ORR_latent` 阈值化得到
-- `BIOM`：连续 non-tte
+- `PFS`, `OS`: TTE, with `OS = PFS + extra` ensuring `OS >= PFS`
+- `ORR`: binary non-tte, obtained by thresholding `ORR_latent`
+- `BIOM`: continuous non-tte
 
 ```{r}
 make_empirical_endpoint_rng <- function(design, orr_cutoff) {
@@ -171,7 +171,7 @@ head(rng_pbo(n = 3))
 head(rng_trt(n = 3))
 ```
 
-## 6. TrialSimulator：定义 endpoints/arms/trial/milestones 并运行
+## 6. TrialSimulator: Define endpoints/arms/trial/milestones and run
 
 ```{r}
 enroller_fn <- function(n) stats::rexp(n, rate = log(2) / 4)
@@ -227,7 +227,7 @@ controller_obj <- controller(trial_obj, listener_obj)
 controller_obj$run(plot_event = FALSE)
 ```
 
-## 7. 读取锁库数据并做基础校验
+## 7. Read Locked Data and Run Basic Checks
 
 ```{r}
 locked_interim <- trial_obj$get_locked_data("interim")
@@ -252,8 +252,8 @@ with(locked_final, tapply(is.na(ORR), arm, mean))
 with(locked_final, tapply(is.na(BIOM), arm, mean))
 ```
 
-## 8. 常见变体
+## 8. Common Variants
 
-- 如果历史数据 ties 很多（离散化严重），可考虑 `jitter > 0` 打散重合点。
-- 如果你希望完全复刻历史边缘分布（而不是自定义边缘），可用 `simdesign_empirical_copula_from_data(data, vars, ...)` 直接从数据生成 `u_data` 并用经验分位数作为边缘。
+- If your historical data have many ties (highly discretized), consider using `jitter > 0` to break ties.
+- If you want to exactly reproduce historical marginals (instead of custom marginals), use `simdesign_empirical_copula_from_data(data, vars, ...)` to generate `u_data` directly from the data and use empirical quantiles as marginals.
 

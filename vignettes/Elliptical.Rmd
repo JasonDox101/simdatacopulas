@@ -1,5 +1,5 @@
 ---
-title: "Elliptical Copula → TrialSimulator：端到端示例（Gaussian）"
+title: "Elliptical Copula → TrialSimulator: End-to-End Example (Gaussian)"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{Elliptical Copula to TrialSimulator (Gaussian)}
@@ -26,13 +26,13 @@ cat(
 )
 ```
 
-本 vignette 展示如何把 `simdatacopulas`（椭圆族 copula）生成的“可控相关 + 任意边缘”的联合生成器，封装成 `TrialSimulator` 需要的 `generator(n)`，并完成：
+This vignette demonstrates how to wrap the `simdatacopulas` (elliptical-family copulas) joint generator—"controllable dependence + arbitrary marginals"—into the `generator(n)` interface required by `TrialSimulator`, and how to:
 
-1. 定义 endpoints / arms / trial
-2. 设置里程碑（milestones）并运行
-3. 读取锁库数据（locked data）并做基础校验
+1. Define endpoints / arms / trial
+2. Set milestones and run
+3. Read locked data and run basic checks
 
-## 1. 加载依赖
+## 1. Load Dependencies
 
 ```{r}
 library(simdata)
@@ -40,21 +40,21 @@ library(simdatacopulas)
 library(TrialSimulator)
 ```
 
-## 2. 用 Gaussian copula 构造联合生成器（椭圆族）
+## 2. Build a Joint Generator with a Gaussian Copula (Elliptical Family)
 
-核心思想：
+Core idea:
 
-1. copula 负责生成相关的 \(U \in (0,1)^d\)
-2. 边缘分位数函数 `dist[[j]](u)` 把每列 \(U_j\) 映射到目标变量尺度
+1. The copula generates dependent \(U \in (0,1)^d\)
+2. The marginal quantile function `dist[[j]](u)` maps each column \(U_j\) to the target variable scale
 
-本示例构造 4 维相关结构（`structure = "un"`）：
+This example uses a 4-dimensional dependence structure (`structure = "un"`):
 
-- `PFS_raw`：PFS 的原始生存时间（正数）
-- `OS_extra`：PFS 之后额外存活时间（正数）
-- `BIOM_latent`：连续 biomarker
-- `ORR_latent`：latent 正态，后续阈值化为二分类 ORR
+- `PFS_raw`: raw PFS time-to-event (positive)
+- `OS_extra`: additional survival time after PFS (positive)
+- `BIOM_latent`: continuous biomarker
+- `ORR_latent`: latent normal variable, later thresholded into binary ORR
 
-### 2.1 相关矩阵（unstructured）
+### 2.1 Correlation Matrix (unstructured)
 
 ```{r}
 Sigma <- matrix(c(
@@ -66,13 +66,13 @@ Sigma <- matrix(c(
 Sigma
 ```
 
-### 2.2 placebo 与 treatment 的边缘分布
+### 2.2 Marginals for placebo and treatment
 
-两组使用相同的 copula 相关结构 `Sigma`，但边缘分布参数不同，用于表达“治疗效果”：
+Both groups use the same copula dependence structure `Sigma`, but different marginal parameters to represent a "treatment effect":
 
-- treatment 的 PFS/OS 更长
-- treatment 的 ORR 更高
-- treatment 的 BIOM 均值更低（仅作示例）
+- Longer PFS/OS under treatment
+- Higher ORR under treatment
+- Lower BIOM mean under treatment (illustrative only)
 
 ```{r}
 dist_pbo <- list(
@@ -90,7 +90,7 @@ dist_trt <- list(
 )
 ```
 
-### 2.3 构造 `simdesign`
+### 2.3 Build `simdesign`
 
 ```{r}
 design_pbo <- simdesign_gaussian_copula(
@@ -108,24 +108,24 @@ design_trt <- simdesign_gaussian_copula(
 )
 ```
 
-## 3. 将 `simdesign` 封装成 TrialSimulator 的 `generator(n)`
+## 3. Wrap `simdesign` into TrialSimulator `generator(n)`
 
-TrialSimulator 对 endpoint generator 的“硬性协议”要点：
+Non-negotiable points of the TrialSimulator endpoint generator contract:
 
-- 第一个参数名必须是 `n`
-- 返回值必须是长度 `n` 的向量，或 `n` 行的 `data.frame`
-- 对 TTE 类型 endpoint：必须包含 `<name>_event` 列
-- 对 non-tte 类型 endpoint：列名必须与 `endpoint(name=...)` 中一致；并需要 `readout`
+- The first argument name must be `n`
+- The return value must be a length-`n` vector, or a `data.frame` with `n` rows
+- For TTE endpoints: must include a `<name>_event` column
+- For non-tte endpoints: column names must match those in `endpoint(name=...)`, and `readout` is required
 
-本例的关键封装逻辑：
+Key wrapping logic in this example:
 
-- 先用 `simdata::simulate_data(design, n_obs = n)` 生成一批相关变量
-- 构造：
+- First generate correlated variables via `simdata::simulate_data(design, n_obs = n)`
+- Then construct:
   - `PFS = PFS_raw`
-  - `OS = PFS_raw + OS_extra`，从而保证 `OS >= PFS`
-  - `*_event` 初始都置为 1（TrialSimulator 会在锁库时点根据 dropout/duration 再做删失截尾）
-  - `ORR` 由 `ORR_latent > cutoff` 得到 0/1
-  - `BIOM` 直接使用 `BIOM_latent`
+  - `OS = PFS_raw + OS_extra`, ensuring `OS >= PFS`
+  - Initialize `*_event` to 1 (TrialSimulator applies censoring/truncation at database lock based on dropout/duration)
+  - `ORR` as 0/1 from `ORR_latent > cutoff`
+  - `BIOM` directly from `BIOM_latent`
 
 ```{r}
 make_elliptical_endpoint_rng <- function(design, orr_cutoff) {
@@ -163,17 +163,17 @@ head(rng_pbo(n = 3))
 head(rng_trt(n = 3))
 ```
 
-## 4. 定义 endpoints 与 arms
+## 4. Define endpoints and arms
 
-我们定义 4 个终点：
+We define 4 endpoints:
 
-- `PFS`, `OS`：TTE
-- `ORR`, `BIOM`：non-tte
+- `PFS`, `OS`: TTE
+- `ORR`, `BIOM`: non-tte
 
-并指定 non-tte 的读出时间（`readout`）：
+And specify readout times for non-tte (`readout`):
 
-- `ORR`：第 6 月读出
-- `BIOM`：基线可得（0）
+- `ORR`: read out at month 6
+- `BIOM`: available at baseline (0)
 
 ```{r}
 ep_pbo <- endpoint(
@@ -197,12 +197,12 @@ arm_trt <- arm(name = "treatment")
 arm_trt$add_endpoints(ep_trt)
 ```
 
-## 5. 定义试验并运行
+## 5. Define and Run the Trial
 
-这里用两条简单的 wrapper 函数定义入组与脱落时间（指数分布）：
+Here we define enrollment and dropout times (exponential) with two simple wrapper functions:
 
-- `enroller_fn(n)`：生成每位患者的入组等待时间（TrialSimulator 会把它累积成日历入组时间）
-- `dropout_fn(n)`：生成每位患者从入组开始算起的脱落时长
+- `enroller_fn(n)`: generates each patient's enrollment waiting time (TrialSimulator accumulates this into calendar enrollment time)
+- `dropout_fn(n)`: generates each patient's dropout duration measured from enrollment
 
 ```{r}
 set.seed(202502)
@@ -241,7 +241,7 @@ controller_obj <- controller(trial_obj, listener_obj)
 controller_obj$run(plot_event = FALSE)
 ```
 
-## 6. 读取锁库数据并做基础校验
+## 6. Read Locked Data and Run Basic Checks
 
 ```{r}
 locked_interim <- trial_obj$get_locked_data("interim")
@@ -251,11 +251,11 @@ head(locked_interim)
 head(locked_final)
 ```
 
-### 6.1 关键一致性检查
+### 6.1 Key Consistency Checks
 
-1. `OS >= PFS`（由生成规则保证；TrialSimulator 做删失/截尾后仍应保持）
-2. `cor(PFS, OS)`（应明显大于 0）
-3. placebo vs treatment 的 ORR/BIOM 差异（应体现你设定的边缘差异）
+1. `OS >= PFS` (guaranteed by the generation rule; should still hold after TrialSimulator censoring/truncation)
+2. `cor(PFS, OS)` (should be clearly > 0)
+3. ORR/BIOM differences between placebo vs treatment (should reflect your marginal choices)
 
 ```{r}
 all(locked_final$OS >= locked_final$PFS, na.rm = TRUE)
@@ -269,10 +269,10 @@ with(subset(locked_final, arm == "placebo"), mean(BIOM, na.rm = TRUE))
 with(subset(locked_final, arm == "treatment"), mean(BIOM, na.rm = TRUE))
 ```
 
-### 6.2 删失与缺失比例（解释 TrialSimulator 输出非常有用）
+### 6.2 Censoring and Missingness Rates (Helpful for Interpreting TrialSimulator Output)
 
-- 对 TTE：`*_event = 0` 通常表示在锁库时点仍未观察到事件（随访截止/脱落导致删失）
-- 对 non-tte：如果锁库时点尚未到达 readout，或患者已脱落，则该变量可能为 `NA`
+- For TTE: `*_event = 0` typically means the event has not been observed by database lock (censored due to follow-up cutoff or dropout)
+- For non-tte: if database lock occurs before readout, or the patient has dropped out, the variable may be `NA`
 
 ```{r}
 with(locked_final, tapply(PFS_event, arm, mean, na.rm = TRUE))
@@ -281,4 +281,3 @@ with(locked_final, tapply(OS_event,  arm, mean, na.rm = TRUE))
 with(locked_final, tapply(is.na(ORR), arm, mean))
 with(locked_final, tapply(is.na(BIOM), arm, mean))
 ```
-
