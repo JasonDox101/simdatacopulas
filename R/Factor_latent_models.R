@@ -389,13 +389,13 @@ simdesign_latent_threshold_gaussian_from_data <- function(
     thresholds[[j]] <- .estimate_thresholds_from_data(y, eps = eps)
 
     if (is.factor(y)) {
-      levels_out[[j]] <- levels(y)
+      levels_out[j] <- list(levels(y))
       x_num[[j]] <- as.integer(y)
     } else if (is.logical(y)) {
-      levels_out[[j]] <- NULL
+      levels_out[j] <- list(NULL)
       x_num[[j]] <- as.integer(y)
     } else if (is.numeric(y) || is.integer(y)) {
-      levels_out[[j]] <- NULL
+      levels_out[j] <- list(NULL)
       x_num[[j]] <- as.numeric(y)
     } else {
       stop("Unsupported variable type: ", vars[[j]], call. = FALSE)
